@@ -20,7 +20,7 @@ mod platform;
 mod range;
 mod snapshot;
 
-pub use diagnostics::{BackendKind, FileAccessDiagnostics};
+pub use diagnostics::{BackendKind, FileAccessDiagnostics, MappingFallbackReason};
 pub use error::{FileAccessError, FileAccessResult};
 pub use identity::FileIdentity;
 pub use lifecycle::{SnapshotState, SnapshotValidation, StaleReason, ValidationTarget};

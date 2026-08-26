@@ -31,11 +31,12 @@ pub struct FileIdentity {
 
 impl FileIdentity {
     pub(crate) fn from_file(file: File) -> io::Result<Self> {
+        Self::from_shared_file(Arc::new(file))
+    }
+
+    pub(crate) fn from_shared_file(file: Arc<File>) -> io::Result<Self> {
         let platform = platform_identity_from_file(&file)?;
-        Ok(Self {
-            file: Arc::new(file),
-            platform,
-        })
+        Ok(Self { file, platform })
     }
 
     pub(crate) fn from_path(path: &Path) -> io::Result<Self> {

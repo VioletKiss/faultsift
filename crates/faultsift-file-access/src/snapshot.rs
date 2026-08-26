@@ -1,15 +1,20 @@
+use std::fmt;
 use std::fs::File;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
+#[cfg(windows)]
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::buffered;
 use crate::identity::CapturedMetadata;
 use crate::lifecycle::SnapshotLifecycle;
+#[cfg(windows)]
+use crate::platform::windows::mapping::{MappedFile, MappingCandidate};
 use crate::{
     ByteLength, ByteOffset, ByteRange, FileAccessDiagnostics, FileAccessError, FileAccessOptions,
-    FileAccessResult, FileIdentity, SnapshotState, SnapshotValidation, StaleReason,
-    ValidationTarget,
+    FileAccessResult, FileIdentity, MappingFallbackReason, SnapshotState, SnapshotValidation,
+    StaleReason, ValidationTarget,
 };
 
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -34,6 +39,7 @@ impl SnapshotGeneration {
 #[derive(Debug)]
 pub struct FileSnapshot {
     identity: FileIdentity,
+    backend: Backend,
     path: PathBuf,
     length: ByteLength,
     captured_metadata: CapturedMetadata,
@@ -41,6 +47,13 @@ pub struct FileSnapshot {
     options: FileAccessOptions,
     diagnostics: FileAccessDiagnostics,
     lifecycle: SnapshotLifecycle,
+}
+
+#[derive(Debug)]
+enum Backend {
+    Buffered,
+    #[cfg(windows)]
+    Mapped(Arc<MappedFile>),
 }
 
 impl FileSnapshot {
@@ -57,36 +70,121 @@ impl FileSnapshot {
             return Err(FileAccessError::UnsupportedFileType { path });
         }
 
-        let file = File::open(&path).map_err(|source| FileAccessError::OpenFailed {
-            path: path.clone(),
+        Self::open_platform(path, options)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn open_platform(path: PathBuf, options: FileAccessOptions) -> FileAccessResult<Self> {
+        let (identity, captured_metadata) = Self::open_buffered_identity(&path)?;
+        let length = captured_metadata.length;
+        let fallback_reason = (length.get() == 0).then_some(MappingFallbackReason::EmptyFile);
+
+        Self::from_parts(
+            identity,
+            Backend::Buffered,
+            path,
+            captured_metadata,
+            options,
+            FileAccessDiagnostics::buffered(fallback_reason),
+        )
+    }
+
+    #[cfg(windows)]
+    fn open_platform(path: PathBuf, options: FileAccessOptions) -> FileAccessResult<Self> {
+        Self::open_windows_with(path, options, crate::platform::windows::mapping::try_create)
+    }
+
+    #[cfg(windows)]
+    fn open_windows_with<Attempt>(
+        path: PathBuf,
+        options: FileAccessOptions,
+        mapping_attempt: Attempt,
+    ) -> FileAccessResult<Self>
+    where
+        Attempt: FnOnce(
+            &Path,
+            &FileIdentity,
+            CapturedMetadata,
+        ) -> Result<MappingCandidate, MappingFallbackReason>,
+    {
+        let (buffered_identity, captured_metadata) = Self::open_buffered_identity(&path)?;
+
+        if captured_metadata.length.get() == 0 {
+            return Self::from_parts(
+                buffered_identity,
+                Backend::Buffered,
+                path,
+                captured_metadata,
+                options,
+                FileAccessDiagnostics::buffered(Some(MappingFallbackReason::EmptyFile)),
+            );
+        }
+
+        match mapping_attempt(&path, &buffered_identity, captured_metadata) {
+            Ok(candidate) => Self::from_parts(
+                candidate.identity,
+                Backend::Mapped(candidate.mapping),
+                path,
+                captured_metadata,
+                options,
+                FileAccessDiagnostics::mapped(),
+            ),
+            Err(reason) => Self::from_parts(
+                buffered_identity,
+                Backend::Buffered,
+                path,
+                captured_metadata,
+                options,
+                FileAccessDiagnostics::buffered(Some(reason)),
+            ),
+        }
+    }
+
+    fn open_buffered_identity(path: &Path) -> FileAccessResult<(FileIdentity, CapturedMetadata)> {
+        let file = File::open(path).map_err(|source| FileAccessError::OpenFailed {
+            path: path.to_path_buf(),
             source,
         })?;
         let metadata = file
             .metadata()
             .map_err(|source| FileAccessError::MetadataFailed {
-                path: path.clone(),
+                path: path.to_path_buf(),
                 source,
             })?;
 
         if !metadata.is_file() {
-            return Err(FileAccessError::UnsupportedFileType { path });
+            return Err(FileAccessError::UnsupportedFileType {
+                path: path.to_path_buf(),
+            });
         }
 
         let captured_metadata = CapturedMetadata::from_metadata(&metadata);
         let identity =
             FileIdentity::from_file(file).map_err(|source| FileAccessError::IdentityFailed {
-                path: path.clone(),
+                path: path.to_path_buf(),
                 source,
             })?;
 
+        Ok((identity, captured_metadata))
+    }
+
+    fn from_parts(
+        identity: FileIdentity,
+        backend: Backend,
+        path: PathBuf,
+        captured_metadata: CapturedMetadata,
+        options: FileAccessOptions,
+        diagnostics: FileAccessDiagnostics,
+    ) -> FileAccessResult<Self> {
         Ok(Self {
             identity,
+            backend,
             path,
-            length: ByteLength::new(metadata.len()),
+            length: captured_metadata.length,
             captured_metadata,
             generation: SnapshotGeneration::next()?,
             options,
-            diagnostics: FileAccessDiagnostics::buffered(),
+            diagnostics,
             lifecycle: SnapshotLifecycle::fresh(),
         })
     }
@@ -147,7 +245,11 @@ impl FileSnapshot {
 
     /// Reads an exact, bounded range into an immutable owned view.
     pub fn view(&self, range: ByteRange) -> FileAccessResult<RangeView> {
-        self.view_with_reader(range, buffered::read_exact_at)
+        match &self.backend {
+            Backend::Buffered => self.view_with_reader(range, buffered::read_exact_at),
+            #[cfg(windows)]
+            Backend::Mapped(mapping) => self.mapped_view(range, Arc::clone(mapping)),
+        }
     }
 
     fn view_with_reader<ReadExact>(
@@ -158,18 +260,7 @@ impl FileSnapshot {
     where
         ReadExact: FnOnce(&File, ByteOffset, &mut [u8]) -> FileAccessResult<()>,
     {
-        self.ensure_fresh()?;
-        self.ensure_in_bounds(range.offset(), range.length(), range.end())?;
-
-        if range.length() > self.options.max_view_bytes() {
-            return Err(FileAccessError::RangeTooLarge {
-                requested: range.length(),
-                maximum: self.options.max_view_bytes(),
-            });
-        }
-
-        ensure_platform_range(range.offset(), range.length(), range.end())?;
-        let length = range.length().try_to_usize()?;
+        let length = self.validate_view_request(range)?;
         let mut bytes = Vec::new();
         bytes
             .try_reserve_exact(length)
@@ -187,10 +278,46 @@ impl FileSnapshot {
         }
 
         Ok(RangeView {
-            bytes: bytes.into_boxed_slice(),
+            backing: RangeBacking::Buffered(bytes.into_boxed_slice()),
             range,
             generation: self.generation,
         })
+    }
+
+    #[cfg(windows)]
+    fn mapped_view(
+        &self,
+        range: ByteRange,
+        mapping: Arc<MappedFile>,
+    ) -> FileAccessResult<RangeView> {
+        let _ = self.validate_view_request(range)?;
+        let start = byte_offset_to_usize(range.offset())?;
+        let end = byte_offset_to_usize(range.end())?;
+
+        Ok(RangeView {
+            backing: RangeBacking::Mapped {
+                mapping,
+                start,
+                end,
+            },
+            range,
+            generation: self.generation,
+        })
+    }
+
+    fn validate_view_request(&self, range: ByteRange) -> FileAccessResult<usize> {
+        self.ensure_fresh()?;
+        self.ensure_in_bounds(range.offset(), range.length(), range.end())?;
+
+        if range.length() > self.options.max_view_bytes() {
+            return Err(FileAccessError::RangeTooLarge {
+                requested: range.length(),
+                maximum: self.options.max_view_bytes(),
+            });
+        }
+
+        ensure_platform_range(range.offset(), range.length(), range.end())?;
+        range.length().try_to_usize()
     }
 
     /// Reads from an explicit offset into a caller-provided buffer.
@@ -225,11 +352,29 @@ impl FileSnapshot {
         ensure_platform_range(offset, to_read, end)?;
 
         let to_read_usize = to_read.try_to_usize()?;
-        if let Err(error) =
-            buffered::read_exact_at(self.identity.file(), offset, &mut buffer[..to_read_usize])
-        {
-            self.mark_read_failure(&error);
-            return Err(error);
+        match &self.backend {
+            Backend::Buffered => {
+                if let Err(error) = buffered::read_exact_at(
+                    self.identity.file(),
+                    offset,
+                    &mut buffer[..to_read_usize],
+                ) {
+                    self.mark_read_failure(&error);
+                    return Err(error);
+                }
+            }
+            #[cfg(windows)]
+            Backend::Mapped(mapping) => {
+                let start = byte_offset_to_usize(offset)?;
+                let end =
+                    start
+                        .checked_add(to_read_usize)
+                        .ok_or(FileAccessError::RangeOverflow {
+                            offset,
+                            length: to_read,
+                        })?;
+                buffer[..to_read_usize].copy_from_slice(mapping.slice(start, end));
+            }
         }
         Ok(to_read_usize)
     }
@@ -359,18 +504,35 @@ impl FileSnapshot {
 }
 
 /// Opaque immutable bytes returned by [`FileSnapshot::view`].
-#[derive(Debug)]
 pub struct RangeView {
-    bytes: Box<[u8]>,
+    backing: RangeBacking,
     range: ByteRange,
     generation: SnapshotGeneration,
+}
+
+enum RangeBacking {
+    Buffered(Box<[u8]>),
+    #[cfg(windows)]
+    Mapped {
+        mapping: Arc<MappedFile>,
+        start: usize,
+        end: usize,
+    },
 }
 
 impl RangeView {
     /// Returns the bytes held by this view.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
-        &self.bytes
+        match &self.backing {
+            RangeBacking::Buffered(bytes) => bytes,
+            #[cfg(windows)]
+            RangeBacking::Mapped {
+                mapping,
+                start,
+                end,
+            } => mapping.slice(*start, *end),
+        }
     }
 
     /// Returns the exact source range represented by this view.
@@ -388,13 +550,24 @@ impl RangeView {
     /// Returns the number of owned view bytes.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.bytes.len()
+        self.as_bytes().len()
     }
 
     /// Returns whether this view contains no bytes.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.bytes.is_empty()
+        self.as_bytes().is_empty()
+    }
+}
+
+impl fmt::Debug for RangeView {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RangeView")
+            .field("bytes", &self.as_bytes())
+            .field("range", &self.range)
+            .field("generation", &self.generation)
+            .finish()
     }
 }
 
@@ -439,6 +612,11 @@ fn usize_to_byte_length(value: usize) -> FileAccessResult<ByteLength> {
     Ok(ByteLength::new(value))
 }
 
+#[cfg(windows)]
+fn byte_offset_to_usize(offset: ByteOffset) -> FileAccessResult<usize> {
+    usize::try_from(offset.get()).map_err(|_| FileAccessError::OffsetNotRepresentable { offset })
+}
+
 #[cfg(test)]
 mod tests {
     use std::io;
@@ -465,6 +643,7 @@ mod tests {
     fn file_snapshot_is_send_and_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<FileSnapshot>();
+        assert_send_sync::<RangeView>();
     }
 
     #[test]
@@ -494,6 +673,52 @@ mod tests {
         assert_eq!(snapshot.view(range).unwrap().as_bytes(), b"healthy");
         assert_eq!(snapshot.state(), SnapshotState::Fresh);
 
+        drop(snapshot);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn injected_mapping_failure_uses_working_buffered_fallback() {
+        let id = NEXT_TEST_FILE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "faultsift-mapping-failure-{}-{id}.tmp",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"fallback bytes").unwrap();
+
+        let options = FileAccessOptions::new(ByteLength::new(64)).unwrap();
+        let snapshot = FileSnapshot::open_windows_with(
+            path.clone(),
+            options,
+            |_path, _identity, _metadata| Err(MappingFallbackReason::MappingCreationFailed),
+        )
+        .unwrap();
+
+        assert_eq!(
+            snapshot.diagnostics().backend(),
+            crate::BackendKind::Buffered
+        );
+        assert_eq!(
+            snapshot.diagnostics().mapping_fallback_reason(),
+            Some(MappingFallbackReason::MappingCreationFailed)
+        );
+        assert!(snapshot.diagnostics().used_buffered_fallback());
+        assert_eq!(
+            snapshot
+                .view(ByteRange::new(ByteOffset::new(0), ByteLength::new(8)).unwrap())
+                .unwrap()
+                .as_bytes(),
+            b"fallback"
+        );
+        let mut buffer = [0_u8; 5];
+        assert_eq!(
+            snapshot.read_at(ByteOffset::new(9), &mut buffer).unwrap(),
+            5
+        );
+        assert_eq!(&buffer, b"bytes");
+
+        drop(snapshot);
         std::fs::remove_file(path).unwrap();
     }
 }

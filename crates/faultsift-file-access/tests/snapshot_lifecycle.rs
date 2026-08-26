@@ -10,7 +10,7 @@ use faultsift_file_access::{
     ByteOffset, FileAccessError, FileSnapshot, SnapshotState, SnapshotValidation, StaleReason,
 };
 
-use support::{TestFile, options, range, unique_path};
+use support::{TestFile, open_buffered_snapshot, options, range, unique_path};
 
 #[test]
 fn unchanged_validation_preserves_fresh_identity_and_generation() {
@@ -30,7 +30,7 @@ fn unchanged_validation_preserves_fresh_identity_and_generation() {
 #[test]
 fn growth_is_invisible_to_reads_until_explicit_validation() {
     let fixture = TestFile::from_bytes(b"old").unwrap();
-    let snapshot = FileSnapshot::open(fixture.path(), options(16)).unwrap();
+    let snapshot = open_buffered_snapshot(fixture.path(), options(16));
     let original_identity = snapshot.identity().clone();
     let original_generation = snapshot.generation();
 
@@ -75,7 +75,7 @@ fn growth_is_invisible_to_reads_until_explicit_validation() {
 #[test]
 fn unexpected_eof_marks_stale_and_the_first_reason_is_permanent() {
     let fixture = TestFile::from_bytes(b"abcdefgh").unwrap();
-    let snapshot = FileSnapshot::open(fixture.path(), options(16)).unwrap();
+    let snapshot = open_buffered_snapshot(fixture.path(), options(16));
     let original_identity = snapshot.identity().clone();
     let original_generation = snapshot.generation();
 
@@ -111,7 +111,7 @@ fn unexpected_eof_marks_stale_and_the_first_reason_is_permanent() {
 #[test]
 fn explicit_validation_distinguishes_truncation() {
     let fixture = TestFile::from_bytes(b"abcdefgh").unwrap();
-    let snapshot = FileSnapshot::open(fixture.path(), options(16)).unwrap();
+    let snapshot = open_buffered_snapshot(fixture.path(), options(16));
     let original_identity = snapshot.identity().clone();
     let original_generation = snapshot.generation();
 
@@ -137,7 +137,7 @@ fn explicit_validation_distinguishes_truncation() {
 #[test]
 fn replacement_is_detected_by_handle_identity_even_at_equal_length() {
     let fixture = TestFile::from_bytes(b"first").unwrap();
-    let snapshot = FileSnapshot::open(fixture.path(), options(16)).unwrap();
+    let snapshot = open_buffered_snapshot(fixture.path(), options(16));
     let original_identity = snapshot.identity().clone();
     let original_generation = snapshot.generation();
 
@@ -180,7 +180,7 @@ fn symlink_identity_tracks_the_resolved_target_and_detects_retargeting() {
     }
     let _link_guard = SymlinkGuard(link_path.clone());
 
-    let snapshot = FileSnapshot::open(&link_path, options(16)).unwrap();
+    let snapshot = open_buffered_snapshot(&link_path, options(16));
     let resolved_target = FileSnapshot::open(original.path(), options(16)).unwrap();
     assert_eq!(snapshot.identity(), resolved_target.identity());
 
@@ -200,7 +200,7 @@ fn symlink_identity_tracks_the_resolved_target_and_detects_retargeting() {
 #[test]
 fn deletion_is_only_observed_by_explicit_validation() {
     let fixture = TestFile::from_bytes(b"retained").unwrap();
-    let snapshot = FileSnapshot::open(fixture.path(), options(16)).unwrap();
+    let snapshot = open_buffered_snapshot(fixture.path(), options(16));
 
     fixture.remove().unwrap();
 
@@ -224,7 +224,7 @@ fn deletion_is_only_observed_by_explicit_validation() {
 #[test]
 fn relevant_metadata_change_is_detected_without_reading_file_bytes() {
     let fixture = TestFile::from_bytes(b"same bytes").unwrap();
-    let snapshot = FileSnapshot::open(fixture.path(), options(16)).unwrap();
+    let snapshot = open_buffered_snapshot(fixture.path(), options(16));
 
     fixture.set_distinct_modified_time().unwrap();
 
@@ -241,7 +241,7 @@ fn relevant_metadata_change_is_detected_without_reading_file_bytes() {
 #[test]
 fn equal_length_overwrite_is_explicitly_best_effort() {
     let fixture = TestFile::from_bytes(b"before").unwrap();
-    let snapshot = FileSnapshot::open(fixture.path(), options(16)).unwrap();
+    let snapshot = open_buffered_snapshot(fixture.path(), options(16));
 
     fixture.overwrite(b"after!").unwrap();
 
@@ -278,7 +278,7 @@ fn reopen_of_unchanged_input_still_creates_a_new_generation() {
 fn readers_and_validation_race_without_deadlock_or_cursor_dependence() {
     let bytes: Vec<u8> = (0..65_536).map(|value| (value % 251) as u8).collect();
     let fixture = TestFile::from_bytes(&bytes).unwrap();
-    let snapshot = Arc::new(FileSnapshot::open(fixture.path(), options(256)).unwrap());
+    let snapshot = Arc::new(open_buffered_snapshot(fixture.path(), options(256)));
     let expected = Arc::new(bytes);
     let start = Arc::new(Barrier::new(9));
 

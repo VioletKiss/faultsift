@@ -4,7 +4,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
-use faultsift_file_access::{ByteLength, ByteOffset, ByteRange, FileAccessOptions};
+#[cfg(windows)]
+use faultsift_file_access::MappingFallbackReason;
+use faultsift_file_access::{
+    BackendKind, ByteLength, ByteOffset, ByteRange, FileAccessOptions, FileSnapshot,
+};
 
 static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
 
@@ -103,6 +107,25 @@ pub fn options(max_view_bytes: u64) -> FileAccessOptions {
 
 pub fn range(offset: u64, length: u64) -> ByteRange {
     ByteRange::new(ByteOffset::new(offset), ByteLength::new(length)).unwrap()
+}
+
+pub fn open_buffered_snapshot(path: &Path, options: FileAccessOptions) -> FileSnapshot {
+    #[cfg(windows)]
+    let existing_writer = OpenOptions::new().write(true).open(path).unwrap();
+
+    let snapshot = FileSnapshot::open(path, options).unwrap();
+    assert_eq!(snapshot.diagnostics().backend(), BackendKind::Buffered);
+
+    #[cfg(windows)]
+    {
+        assert_eq!(
+            snapshot.diagnostics().mapping_fallback_reason(),
+            Some(MappingFallbackReason::IncompatibleWriter)
+        );
+        drop(existing_writer);
+    }
+
+    snapshot
 }
 
 pub fn unique_path(kind: &str) -> PathBuf {

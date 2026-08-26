@@ -7,6 +7,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 
+#[cfg(windows)]
+use faultsift_file_access::MappingFallbackReason;
 use faultsift_file_access::{
     BackendKind, ByteLength, ByteOffset, ByteRange, FileAccessError, FileAccessOptions,
     FileSnapshot,
@@ -123,6 +125,25 @@ fn range(offset: u64, length: u64) -> ByteRange {
     ByteRange::new(ByteOffset::new(offset), ByteLength::new(length)).unwrap()
 }
 
+fn open_buffered_snapshot(path: &Path, options: FileAccessOptions) -> FileSnapshot {
+    #[cfg(windows)]
+    let existing_writer = OpenOptions::new().write(true).open(path).unwrap();
+
+    let snapshot = FileSnapshot::open(path, options).unwrap();
+    assert_eq!(snapshot.diagnostics().backend(), BackendKind::Buffered);
+
+    #[cfg(windows)]
+    {
+        assert_eq!(
+            snapshot.diagnostics().mapping_fallback_reason(),
+            Some(MappingFallbackReason::IncompatibleWriter)
+        );
+        drop(existing_writer);
+    }
+
+    snapshot
+}
+
 #[test]
 fn reads_exact_views_and_caller_buffers() {
     let fixture = TestFile::from_bytes(b"0123456789").unwrap();
@@ -130,6 +151,9 @@ fn reads_exact_views_and_caller_buffers() {
 
     assert_eq!(snapshot.len().get(), 10);
     assert!(!snapshot.is_empty());
+    #[cfg(windows)]
+    assert_eq!(snapshot.diagnostics().backend(), BackendKind::Mapped);
+    #[cfg(target_os = "linux")]
     assert_eq!(snapshot.diagnostics().backend(), BackendKind::Buffered);
 
     let view = snapshot.view(range(2, 4)).unwrap();
@@ -240,6 +264,8 @@ fn reads_offsets_on_both_sides_of_four_gib() {
     let snapshot = FileSnapshot::open(fixture.path(), options(3)).unwrap();
 
     assert_eq!(snapshot.len().get(), FOUR_GIB + 2);
+    #[cfg(windows)]
+    assert_eq!(snapshot.diagnostics().backend(), BackendKind::Mapped);
     assert_eq!(
         snapshot.view(range(FOUR_GIB - 1, 3)).unwrap().as_bytes(),
         b"ABC"
@@ -302,7 +328,7 @@ fn reports_missing_files_as_open_failures() {
 #[test]
 fn reports_unexpected_eof_after_truncate() {
     let fixture = TestFile::from_bytes(b"captured bytes").unwrap();
-    let snapshot = FileSnapshot::open(fixture.path(), options(32)).unwrap();
+    let snapshot = open_buffered_snapshot(fixture.path(), options(32));
 
     OpenOptions::new()
         .write(true)

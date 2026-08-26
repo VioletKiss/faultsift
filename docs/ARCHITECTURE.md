@@ -10,7 +10,7 @@ It does not define product priority, release numbers, or the scope of a particul
 
 M0 established the Rust workspace, the Tauri 2 desktop shell under `apps/desktop/src-tauri`, the React + TypeScript frontend directly under `apps/desktop`, and the Tauri-independent `faultsift-core` crate. The shell contains no FaultSift business capability.
 
-[ADR-0003](adr/0003-large-file-byte-access-strategy.md) establishes `faultsift-file-access` as the infrastructure layer below `faultsift-core`. The safe buffered baseline and snapshot lifecycle are implemented: regular files have a fixed captured identity, length, and opaque generation; Windows identity uses the opened handle's complete volume serial number and 128-bit file ID; explicit validation can make a snapshot permanently stale; and `reopen()` creates a separate generation. Checked `u64` byte ranges, bounded views, and caller-buffer reads remain the only data-access concepts. Conditional Windows mapping and benchmark calibration remain follow-up work. Other remaining components in this document likewise describe approved target boundaries rather than implemented features.
+[ADR-0003](adr/0003-large-file-byte-access-strategy.md) establishes `faultsift-file-access` as the infrastructure layer below `faultsift-core`. The safe buffered baseline, snapshot lifecycle, and conditional Windows mapping backend are implemented: regular files have a fixed captured identity, length, and opaque generation; Windows identity uses the opened handle's complete volume serial number and 128-bit file ID; explicit validation can make a snapshot permanently stale; and `reopen()` creates a separate generation. On 64-bit Windows, non-empty resolved targets on fixed local NTFS or ReFS volumes may use a read-only whole-file mapping after a restrictive stability handle proves compatible sharing; all uncertainty or mapping failure retains the already-open buffered snapshot. Checked `u64` byte ranges, bounded views, and caller-buffer reads remain the only data-access concepts. Benchmark calibration remains follow-up work. Other remaining components in this document likewise describe approved target boundaries rather than implemented features.
 
 ## System Context
 
@@ -109,14 +109,14 @@ Raw log text remains on disk. Indexes and aggregates retain offsets, lengths, fi
 - Normal reads do not perform complete metadata validation. `validate()` is explicit; unexpected EOF, relevant OS errors, or backend invalidation can also mark a snapshot stale.
 - Snapshot state is one-way from fresh to stale. A stale snapshot cannot become fresh; `reopen()` creates a new snapshot and generation.
 - Linux uses positioned buffered I/O in the first implementation.
-- Windows may use conditional read-only memory mapping only when stable file-handle conditions can be established; otherwise access falls back transparently to buffered I/O.
+- Windows uses conditional read-only memory mapping only when the resolved target is a non-empty regular file on a fixed local NTFS or ReFS volume, a restrictive read handle can exclude write/delete access, the complete mapping is representable, and mapping creation succeeds; otherwise access falls back transparently to buffered I/O.
 - Empty files are valid and are not mapped. Network files, removable media, and uncertain filesystems use buffered access.
 - File Access recognizes bytes, not lines, text encodings, parser records, search semantics, or UI concepts. Invalid UTF-8 remains unchanged.
 - Snapshots support concurrent positioned reads and do not expose a shared seek cursor or concrete backend to domain code.
 
 The architecture deliberately does not select a Windows mapping crate or binding. The focused Windows file-identity FFI does not constrain that later mapping implementation choice.
 
-The workspace default continues to forbid unsafe Rust. Only audited Windows platform FFI modules inside `faultsift-file-access` may contain reviewed, minimal unsafe boundaries; this currently includes the full Windows file-identity query and may later include the separately approved mapping module. Unsafe Rust anywhere else is a blocking architecture violation unless superseded by another accepted ADR.
+The workspace default continues to forbid unsafe Rust. Only the audited Windows platform FFI modules `identity.rs` and `mapping.rs` inside `faultsift-file-access` contain reviewed, minimal unsafe boundaries. They isolate the full Windows file-identity query, resolved-volume eligibility queries, read-only mapping creation, immutable slice construction, and deterministic unmapping. Unsafe Rust anywhere else is a blocking architecture violation unless superseded by another accepted ADR.
 
 ## Event and Parsing Invariants
 
