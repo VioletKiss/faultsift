@@ -1,0 +1,24 @@
+{
+  "name": "faultsift",
+  "private": true,
+  "version": "0.0.0",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": "24.19.0",
+    "pnpm": "11.19.0"
+  },
+  "scripts": {
+    "build": "pnpm --filter @faultsift/desktop build",
+    "dev": "pnpm --filter @faultsift/desktop dev",
+    "format": "prettier --write package.json pnpm-workspace.yaml .github/**/*.yml apps/desktop/**/*.{js,ts,tsx,css,html,json}",
+    "format:check": "prettier --check package.json pnpm-workspace.yaml .github/**/*.yml apps/desktop/**/*.{js,ts,tsx,css,html,json}",
+    "lint": "pnpm --filter @faultsift/desktop lint",
+    "tauri": "pnpm --filter @faultsift/desktop tauri",
+    "test": "pnpm --filter @faultsift/desktop test",
+    "typecheck": "pnpm --filter @faultsift/desktop typecheck"
+  },
+  "devDependencies": {
+    "prettier": "3.6.2"
+  }
+}

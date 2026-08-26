@@ -1,0 +1,27 @@
+# JavaScript
+node_modules/
+dist/
+
+# Rust
+target/
+
+# Tauri generated files
+apps/desktop/src-tauri/gen/
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Private development and agent workflow documents
+.agents/
+**/AGENTS.md
+docs/tasks/
+docs/FaultSift-Codex-Development-Workflow.md
