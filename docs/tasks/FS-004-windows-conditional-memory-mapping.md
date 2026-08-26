@@ -1,6 +1,6 @@
 # FS-004: Windows Conditional Memory Mapping
 
-- Status: In Progress
+- Status: Completed
 - Owner: Unassigned
 - Related ADRs: ADR-0003
 - Roadmap stage: M1 — File Access
@@ -120,7 +120,7 @@ Do not claim the Ubuntu or external CI result passed unless it actually ran.
 
 ## Local Completion Evidence
 
-Implemented and independently reviewed on 2026-08-26 on the Windows primary platform. Final task completion remains gated on required GitHub Actions for the exact pushed commit.
+Implemented, independently reviewed, and remotely verified on 2026-08-26.
 
 - Implementation uses the existing Windows-only `windows-sys 0.61.2` dependency directly; no new crate or lockfile entry was added. The enabled `Win32_Security`, `Win32_System_Memory`, and `Win32_System_WindowsProgramming` features provide the mapping, security-attribute signature, and drive-classification bindings that `std` does not expose.
 - The stability open requests read-only access to an existing file and sets exactly `FILE_SHARE_READ`. Win32's mutual sharing check therefore rejects existing handles with write/delete access and rejects new write/delete access while the retained handle is alive, while still allowing read-only validation and `reopen()` handles.
@@ -138,6 +138,8 @@ Implemented and independently reviewed on 2026-08-26 on the Windows primary plat
 - `git diff --check` passed.
 - Unsafe scanning found matches only in the approved Windows `identity.rs` and `mapping.rs` modules. FS-004 added unsafe only to `mapping.rs`, with a local safety invariant for every FFI call, owned-handle conversion, slice construction, Send/Sync implementation, and unmap.
 - Independent `faultsift-review` verdict: `PASS_WITH_WARNINGS`, no Blocking issues. The sole warning is the expected exact-SHA Ubuntu CI evidence gap, which is permitted for push under the repository workflow.
+- GitHub Actions run [32971935072](https://github.com/VioletKiss/faultsift/actions/runs/32971935072) completed successfully for implementation commit `0a4a3d84ee5df0b317b8e775a717f5441aefc2ca`.
+- Required `Rust (windows-2022)`, `Rust (ubuntu-22.04)`, and `Frontend quality` checks all completed with `success`; the Ubuntu result resolves the independent review's sole evidence warning.
 
 ## Expected Files
 
