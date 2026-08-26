@@ -13,12 +13,17 @@ compile_error!("faultsift-file-access currently supports Windows and Linux targe
 mod buffered;
 mod diagnostics;
 mod error;
+mod identity;
+mod lifecycle;
 mod options;
+mod platform;
 mod range;
 mod snapshot;
 
 pub use diagnostics::{BackendKind, FileAccessDiagnostics};
 pub use error::{FileAccessError, FileAccessResult};
+pub use identity::FileIdentity;
+pub use lifecycle::{SnapshotState, SnapshotValidation, StaleReason, ValidationTarget};
 pub use options::FileAccessOptions;
 pub use range::{ByteLength, ByteOffset, ByteRange};
 pub use snapshot::{FileSnapshot, RangeView, SnapshotGeneration};

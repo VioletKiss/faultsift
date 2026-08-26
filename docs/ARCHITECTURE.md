@@ -10,7 +10,7 @@ It does not define product priority, release numbers, or the scope of a particul
 
 M0 established the Rust workspace, the Tauri 2 desktop shell under `apps/desktop/src-tauri`, the React + TypeScript frontend directly under `apps/desktop`, and the Tauri-independent `faultsift-core` crate. The shell contains no FaultSift business capability.
 
-[ADR-0003](adr/0003-large-file-byte-access-strategy.md) establishes `faultsift-file-access` as the infrastructure layer below `faultsift-core`. The safe buffered baseline is implemented: it opens regular files with a fixed captured length and opaque generation, uses checked `u64` byte ranges, and provides bounded views plus caller-buffer reads on Windows and Linux. Snapshot validation, identity tracking, reopen/stale lifecycle, conditional Windows mapping, and benchmark calibration remain follow-up work. Other remaining components in this document likewise describe approved target boundaries rather than implemented features.
+[ADR-0003](adr/0003-large-file-byte-access-strategy.md) establishes `faultsift-file-access` as the infrastructure layer below `faultsift-core`. The safe buffered baseline and snapshot lifecycle are implemented: regular files have a fixed captured identity, length, and opaque generation; Windows identity uses the opened handle's complete volume serial number and 128-bit file ID; explicit validation can make a snapshot permanently stale; and `reopen()` creates a separate generation. Checked `u64` byte ranges, bounded views, and caller-buffer reads remain the only data-access concepts. Conditional Windows mapping and benchmark calibration remain follow-up work. Other remaining components in this document likewise describe approved target boundaries rather than implemented features.
 
 ## System Context
 
@@ -114,9 +114,9 @@ Raw log text remains on disk. Indexes and aggregates retain offsets, lengths, fi
 - File Access recognizes bytes, not lines, text encodings, parser records, search semantics, or UI concepts. Invalid UTF-8 remains unchanged.
 - Snapshots support concurrent positioned reads and do not expose a shared seek cursor or concrete backend to domain code.
 
-The architecture deliberately does not select a Windows mapping crate or direct OS binding. That implementation choice can change without altering the byte-access contract.
+The architecture deliberately does not select a Windows mapping crate or binding. The focused Windows file-identity FFI does not constrain that later mapping implementation choice.
 
-The workspace default continues to forbid unsafe Rust. Only the approved Windows mapping module inside `faultsift-file-access` may contain a reviewed, minimal unsafe boundary; unsafe Rust anywhere else is a blocking architecture violation unless superseded by another accepted ADR.
+The workspace default continues to forbid unsafe Rust. Only audited Windows platform FFI modules inside `faultsift-file-access` may contain reviewed, minimal unsafe boundaries; this currently includes the full Windows file-identity query and may later include the separately approved mapping module. Unsafe Rust anywhere else is a blocking architecture violation unless superseded by another accepted ADR.
 
 ## Event and Parsing Invariants
 

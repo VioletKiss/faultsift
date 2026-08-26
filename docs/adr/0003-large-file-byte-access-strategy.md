@@ -13,7 +13,7 @@ FaultSift must inspect GB to tens-of-GB log files without loading the whole file
 
 Read-only memory mapping can provide efficient random access, but mapping a file that another process may truncate or replace has platform-specific safety consequences. Linux cannot use advisory locks to prove that a mapping will remain valid. Windows can establish stronger sharing constraints for suitable local files, but those constraints may be unavailable for an actively written file or an unsupported filesystem.
 
-The workspace currently forbids unsafe Rust. A mapping backend requires a small, auditable unsafe boundary, without weakening the rule for domain, parser, index, pattern, timeline, or other analysis code.
+The workspace currently forbids unsafe Rust. Authoritative Windows handle identity and a later mapping backend require small, auditable platform FFI boundaries, without weakening the rule for domain, parser, index, pattern, timeline, or other analysis code.
 
 ## Decision Drivers
 
@@ -101,19 +101,20 @@ Static snapshot therefore means a fixed identity and byte boundary with explicit
 
 - Linux uses positioned buffered I/O in the first implementation. Advisory locking is not treated as proof that a mapping is safe.
 - Windows may use a read-only mapping only for a suitable local regular file after establishing handle-sharing conditions that exclude existing writers and prevent write, truncate, rename, or delete operations for the mapping lifetime.
+- Windows file identity is captured from the opened handle with `GetFileInformationByHandleEx(FileIdInfo)` using the complete volume serial number and 128-bit file ID. If that identity cannot be obtained reliably, opening or validation returns a typed error; it must not fall back to a potentially colliding legacy 64-bit file index and report `Unchanged`.
 - Empty files are valid snapshots but are never mapped.
 - Network files, removable media, unsupported file types, uncertain filesystem capabilities, failed stability checks, and mapping failures use the buffered backend or return a typed open error if buffered access also fails.
 - Mapping failure is transparent to domain code when buffered fallback succeeds.
-- The architecture does not select `memmap2`, `windows-sys`, the `windows` crate, or direct Win32 calls. That choice belongs to the Windows mapping implementation task and may change without superseding this ADR.
+- The architecture does not select `memmap2`, `windows-sys`, the `windows` crate, or direct Win32 calls for memory mapping. The focused binding used for authoritative file identity does not constrain the later Windows mapping implementation, which may change without superseding this ADR.
 
 ### Unsafe boundary and lint policy
 
 - The workspace default remains `unsafe_code = "forbid"` for `faultsift-core` and all other ordinary crates.
 - Only `faultsift-file-access` may opt out of the workspace-level `forbid`, solely because Rust does not allow a nested module to override `forbid`.
-- Within `faultsift-file-access`, unsafe Rust remains denied by default. A narrowly scoped platform module such as `platform/windows/mapping` may explicitly permit the minimum unsafe operations required for the mapping implementation.
-- Snapshot logic, range validation, buffered I/O, backend selection, and all non-Windows code remain safe Rust.
-- Every unsafe operation must document the safety invariant that makes the mapping valid and must be covered by focused platform tests and review.
-- Unsafe Rust anywhere outside the approved Windows mapping boundary is a blocking architecture violation unless a later accepted ADR explicitly changes this rule.
+- Within `faultsift-file-access`, unsafe Rust remains denied by default. Only narrowly scoped modules under `platform/windows/` may explicitly permit the minimum unsafe operations required for audited Windows FFI, including authoritative file identity and the separately approved mapping implementation.
+- Snapshot logic, range validation, buffered I/O, backend selection, and all non-Windows code remain safe Rust; safe wrappers isolate callers from the Windows FFI boundary.
+- Every unsafe operation must document the safety invariant for its pointers, handles, buffers, and lifetimes and must be covered by focused platform tests and review.
+- Unsafe Rust anywhere outside audited Windows platform FFI modules is a blocking architecture violation unless a later accepted ADR explicitly changes this rule.
 
 ## Consequences
 
@@ -156,7 +157,7 @@ Implementation must verify:
 - Linux buffered behavior under concurrent source mutation;
 - process-level mutation tests that terminate normally with a result or typed error;
 - reproducible backend benchmarks without invented absolute thresholds;
-- lint enforcement that rejects unsafe Rust outside the approved mapping module.
+- lint enforcement that rejects unsafe Rust outside audited Windows platform FFI modules.
 
 ## References
 

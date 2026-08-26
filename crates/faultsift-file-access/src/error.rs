@@ -4,7 +4,7 @@ use std::fmt;
 use std::io;
 use std::path::PathBuf;
 
-use crate::{ByteLength, ByteOffset};
+use crate::{ByteLength, ByteOffset, StaleReason, ValidationTarget};
 
 /// Result type used by the byte-access layer.
 pub type FileAccessResult<T> = Result<T, FileAccessError>;
@@ -19,6 +19,8 @@ pub enum FileAccessError {
     OpenFailed { path: PathBuf, source: io::Error },
     /// Metadata for an opened file could not be read.
     MetadataFailed { path: PathBuf, source: io::Error },
+    /// Stable identity could not be captured from the opened file handle.
+    IdentityFailed { path: PathBuf, source: io::Error },
     /// The opened object was not a seekable regular file.
     UnsupportedFileType { path: PathBuf },
     /// The process-local generation counter was exhausted.
@@ -59,6 +61,14 @@ pub enum FileAccessError {
         offset: ByteOffset,
         source: io::Error,
     },
+    /// The snapshot was already stale before a byte operation began.
+    StaleSnapshot { reason: StaleReason },
+    /// Explicit validation could not inspect the opened file or current path.
+    ValidationFailed {
+        path: PathBuf,
+        target: ValidationTarget,
+        source: io::Error,
+    },
 }
 
 impl fmt::Display for FileAccessError {
@@ -78,6 +88,13 @@ impl fmt::Display for FileAccessError {
                 write!(
                     formatter,
                     "failed to read metadata for {}: {source}",
+                    path.display()
+                )
+            }
+            Self::IdentityFailed { path, source } => {
+                write!(
+                    formatter,
+                    "failed to capture file identity for {}: {source}",
                     path.display()
                 )
             }
@@ -147,6 +164,18 @@ impl fmt::Display for FileAccessError {
                     offset.get()
                 )
             }
+            Self::StaleSnapshot { reason } => {
+                write!(formatter, "snapshot is stale: {reason}")
+            }
+            Self::ValidationFailed {
+                path,
+                target,
+                source,
+            } => write!(
+                formatter,
+                "failed to validate {target} for {}: {source}",
+                path.display()
+            ),
         }
     }
 }
@@ -156,7 +185,9 @@ impl Error for FileAccessError {
         match self {
             Self::OpenFailed { source, .. }
             | Self::MetadataFailed { source, .. }
-            | Self::ReadFailed { source, .. } => Some(source),
+            | Self::IdentityFailed { source, .. }
+            | Self::ReadFailed { source, .. }
+            | Self::ValidationFailed { source, .. } => Some(source),
             Self::AllocationFailed { source, .. } => Some(source),
             _ => None,
         }
