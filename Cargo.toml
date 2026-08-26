@@ -1,5 +1,9 @@
 [workspace]
-members = ["apps/desktop/src-tauri", "crates/faultsift-core"]
+members = [
+    "apps/desktop/src-tauri",
+    "crates/faultsift-core",
+    "crates/faultsift-file-access",
+]
 resolver = "2"
 
 [workspace.package]

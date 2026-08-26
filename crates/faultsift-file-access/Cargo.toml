@@ -1,0 +1,15 @@
+[package]
+name = "faultsift-file-access"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# This crate must be able to host FS-004's single scoped Windows mapping
+# exception later. It therefore mirrors the workspace lints while using
+# `deny` instead of the workspace's non-overridable `forbid` for unsafe code.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = "warn"

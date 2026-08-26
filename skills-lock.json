@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "frontend-design": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/frontend-design/SKILL.md",
+      "computedHash": "93f53fd1c0352d3d7ec17b8f73d7351bf76f4821e55d123c9d2abc2c53ba48e4"
+    },
+    "native-feel-cross-platform-desktop": {
+      "source": "yetone/native-feel-skill",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "f5a8f414443d82066cc6f251dcd8fdec9a3eac9afaa0ce16101a7aaf0b6fb8f0"
+    }
+  }
+}

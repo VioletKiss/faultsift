@@ -8,29 +8,26 @@ It does not define product priority, release numbers, or the scope of a particul
 
 ## Current State
 
-M0 established the Rust workspace, the Tauri 2 desktop shell under `apps/desktop/src-tauri`, the React + TypeScript frontend directly under `apps/desktop`, and the Tauri-independent `faultsift-core` crate. The shell contains no FaultSift business capability; the remaining components in this document describe approved target boundaries rather than implemented features.
+M0 established the Rust workspace, the Tauri 2 desktop shell under `apps/desktop/src-tauri`, the React + TypeScript frontend directly under `apps/desktop`, and the Tauri-independent `faultsift-core` crate. The shell contains no FaultSift business capability.
+
+[ADR-0003](adr/0003-large-file-byte-access-strategy.md) establishes `faultsift-file-access` as the infrastructure layer below `faultsift-core`. The safe buffered baseline is implemented: it opens regular files with a fixed captured length and opaque generation, uses checked `u64` byte ranges, and provides bounded views plus caller-buffer reads on Windows and Linux. Snapshot validation, identity tracking, reopen/stale lifecycle, conditional Windows mapping, and benchmark calibration remain follow-up work. Other remaining components in this document likewise describe approved target boundaries rather than implemented features.
 
 ## System Context
 
 The target desktop structure is:
 
 ```text
-apps/desktop/                 React + TypeScript presentation
-      │
-      │ Tauri 2 commands / bounded responses
-      ▼
-apps/desktop/src-tauri/       desktop adapter
-      │
-      ▼
-crates/faultsift-core/        Rust domain foundation
-      │
-      ├── local log files
-      └── optional structured AI context
-                 ├── Ollama
-                 └── user-configured OpenAI-compatible API
+apps/desktop/ → apps/desktop/src-tauri/ ┐
+                                        ├→ crates/faultsift-core/
+future CLI ─────────────────────────────┘           │
+                                                    ▼
+                                  crates/faultsift-file-access/
+                                                    │
+                                                    ▼
+                                             OS file APIs
 ```
 
-React source lives directly under `apps/desktop`; there is no separate `web/ui` package. Rust owns file access and analysis. React owns presentation and interaction. Tauri is an adapter between the desktop UI and domain APIs; core analysis must remain usable by a future CLI without depending on Tauri.
+React source lives directly under `apps/desktop`; there is no separate `web/ui` package. Rust owns file access and analysis. React owns presentation and interaction. Tauri is an adapter between the desktop UI and domain APIs; core analysis must remain usable by a future CLI without depending on Tauri. Optional AI adapters consume selected structured analysis output downstream of deterministic core analysis and do not alter this file-access dependency direction.
 
 ## M0 Desktop Bootstrap Baseline
 
@@ -56,7 +53,7 @@ The documented architecture identifies these logical responsibilities:
 
 | Component | Responsibility |
 |---|---|
-| FileReader | Read-only, bounded access to local file bytes |
+| File Access / FileSnapshot | Stable, read-only, bounded access to local file bytes |
 | LineIndexer | Locate lines or ranges without retaining all raw lines |
 | EventParser | Parse timestamps, levels, threads, loggers, messages, identifiers, and logical event boundaries |
 | PatternMiner | Normalize dynamic values and form similar-event patterns |
@@ -102,7 +99,24 @@ Raw log text remains on disk. Indexes and aggregates retain offsets, lengths, fi
 - Offset and length types must remain safe for files larger than 4 GiB.
 - Performance-sensitive work needs reproducible benchmarks before enforcing unapproved absolute thresholds.
 
-Read-only memory mapping is the documented planned direction for random byte access, but its lifecycle and file-mutation semantics must be designed and recorded before FS-002 is implemented.
+## Large-File Byte Access
+
+[ADR-0003](adr/0003-large-file-byte-access-strategy.md) establishes these target boundaries:
+
+- `faultsift-file-access` is a byte-only infrastructure crate below `faultsift-core`.
+- Opening a supported regular file creates a static `FileSnapshot` with a fixed length, file identity, and generation.
+- Snapshots use 64-bit targets, `u64` file coordinates, checked range arithmetic, bounded `RangeView` values, and caller-buffer `read_at` operations.
+- Normal reads do not perform complete metadata validation. `validate()` is explicit; unexpected EOF, relevant OS errors, or backend invalidation can also mark a snapshot stale.
+- Snapshot state is one-way from fresh to stale. A stale snapshot cannot become fresh; `reopen()` creates a new snapshot and generation.
+- Linux uses positioned buffered I/O in the first implementation.
+- Windows may use conditional read-only memory mapping only when stable file-handle conditions can be established; otherwise access falls back transparently to buffered I/O.
+- Empty files are valid and are not mapped. Network files, removable media, and uncertain filesystems use buffered access.
+- File Access recognizes bytes, not lines, text encodings, parser records, search semantics, or UI concepts. Invalid UTF-8 remains unchanged.
+- Snapshots support concurrent positioned reads and do not expose a shared seek cursor or concrete backend to domain code.
+
+The architecture deliberately does not select a Windows mapping crate or direct OS binding. That implementation choice can change without altering the byte-access contract.
+
+The workspace default continues to forbid unsafe Rust. Only the approved Windows mapping module inside `faultsift-file-access` may contain a reviewed, minimal unsafe boundary; unsafe Rust anywhere else is a blocking architecture violation unless superseded by another accepted ADR.
 
 ## Event and Parsing Invariants
 
@@ -148,17 +162,18 @@ An AI adapter must not receive the entire log file. Core behavior and tests cann
 The intended dependency direction is:
 
 ```text
-desktop UI → Tauri adapter → domain APIs → file / analysis primitives
-optional CLI ────────────────────┘
-AI adapter → structured analysis outputs
+desktop UI → Tauri adapter ┐
+                           ├→ faultsift-core → faultsift-file-access → OS file APIs
+future CLI ────────────────┘
+
+AI adapter ← selected structured analysis outputs
 ```
 
-Domain and file-processing layers do not depend on desktop UI concepts. React must not become a second implementation of parsing, indexing, search, pattern, timeline, or anomaly logic.
+`faultsift-core` owns domain and orchestration behavior. `faultsift-file-access` owns file snapshots and backend-neutral byte ranges. Neither layer depends on desktop UI concepts. React must not become a second implementation of file access, parsing, indexing, search, pattern, timeline, or anomaly logic.
 
 ## Architectural Open Questions
 
-- Beyond the M0 `faultsift-core` foundation, what future Rust crate boundaries are justified?
-- What read-only mapping abstraction and lifecycle rules apply when a mapped file grows, changes, or is truncated?
+- Beyond the accepted `faultsift-core` and `faultsift-file-access` boundary, what future Rust crate splits are justified by demonstrated contracts?
 - Which line-index strategy balances lookup latency and bounded memory: full, sparse, lazy, or a hybrid?
 - Are indexes transient or persisted, and if persisted, what invalidation and versioning rules apply?
 - What precisely defines pattern identity, especially for exception type, message normalization, and stack context?

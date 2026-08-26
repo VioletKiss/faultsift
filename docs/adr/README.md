@@ -39,3 +39,4 @@ Accepted architecture decisions:
 
 - [ADR-0001: Technology Stack](0001-technology-stack.md)
 - [ADR-0002: Repository Layout](0002-repository-layout.md)
+- [ADR-0003: Large File Byte Access Strategy](0003-large-file-byte-access-strategy.md)

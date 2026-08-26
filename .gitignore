@@ -23,5 +23,4 @@ Thumbs.db
 # Private development and agent workflow documents
 .agents/
 **/AGENTS.md
-docs/tasks/
 docs/FaultSift-Codex-Development-Workflow.md
