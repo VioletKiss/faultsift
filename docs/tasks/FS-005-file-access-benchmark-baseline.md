@@ -1,6 +1,6 @@
 # FS-005: File Access Benchmark Baseline
 
-- Status: In Progress
+- Status: Completed
 - Owner: Codex
 - Related ADRs: ADR-0003
 - Roadmap stage: M1 — File Access
@@ -64,12 +64,12 @@ ADR-0003 treats performance as product behavior but deliberately leaves the exac
 - [x] A deterministic benchmark harness runs on stable Rust through one documented command.
 - [x] Sequential and seeded random access cover both `RangeView` and caller-buffer `read_at`.
 - [x] Windows results distinguish automatic mapped access from forced-buffered access using diagnostics rather than assumptions.
-- [ ] Linux compiles and runs the buffered benchmark path without any mapping implementation.
+- [x] Linux compiles and runs the buffered benchmark path without any mapping implementation.
 - [x] Benchmark cases use bounded live views, buffers, fixture generation, and concurrency independent of total file size.
 - [x] Greater-than-4-GiB coordinate coverage uses a bounded sparse fixture and is clearly separated from populated-file throughput results.
 - [x] The recorded baseline includes environment, fixture, access-pattern, cache-condition, backend, latency/throughput, and available memory observations.
 - [x] A conservative, configurable named default for `max_view_bytes` is documented with its resource rationale and evidence.
-- [ ] CI or its existing Rust jobs compile the benchmark harness on Windows and Ubuntu without enforcing noisy timing thresholds.
+- [x] CI or its existing Rust jobs compile the benchmark harness on Windows and Ubuntu without enforcing noisy timing thresholds.
 - [x] No benchmark adds or changes file-access semantics, unsafe boundaries, or later product capabilities.
 
 ## Test Cases
@@ -100,9 +100,9 @@ cargo bench -p faultsift-file-access --bench byte_access
 
 Review the generated baseline document and confirm that it reports actual backend diagnostics, environment, fixture construction, cache limitations, and memory methodology. External Windows/Ubuntu CI compilation must be reported separately and must not be claimed as passed from a local benchmark run.
 
-## Local Completion Evidence
+## Completion Evidence
 
-Implementation and Windows local verification completed on 2026-08-27. Independent review returned `PASS_WITH_WARNINGS`; only exact-SHA remote CI and Ubuntu runtime evidence remain pending.
+Implementation, Windows local verification, independent review, and exact-SHA remote CI completed on 2026-08-27.
 
 - Criterion 0.7.0 is a benchmark-only dev-dependency with default features disabled and only `cargo_bench_support` enabled. Version 0.7 was selected over 0.8 because 0.8 unconditionally introduced a native C build dependency that prevented the supported Windows-to-Linux bench cross-check without an unrelated cross-C toolchain.
 - The populated fixture defaults to 64 MiB, streams deterministic bytes through a 1 MiB setup buffer, and uses hard maximums of 1 GiB fixture size and 256 MiB workload size for manual overrides.
@@ -118,12 +118,12 @@ Implementation and Windows local verification completed on 2026-08-27. Independe
 - `cargo test --workspace` passed: 49 tests, 0 failures.
 - `cargo check -p faultsift-file-access --benches` passed.
 - `cargo bench -p faultsift-file-access --bench byte_access --no-run` passed.
-- `cargo bench -p faultsift-file-access --bench byte_access` passed locally on Windows with Criterion 0.7.0. The recorded result remains explicitly tied to the current tracked working tree and will be rerun for the exact implementation commit before completion.
+- `cargo bench -p faultsift-file-access --bench byte_access` passed locally on Windows with Criterion 0.7.0. A complete confirmation run on implementation commit `9b086ccf8708138e15887612dea5bf4293455a0b` reported that exact SHA with `tracked_worktree_dirty=false`.
 - `cargo check -p faultsift-file-access --target x86_64-unknown-linux-gnu --benches` passed.
-- `cargo clippy -p faultsift-file-access --target x86_64-unknown-linux-gnu --all-targets --all-features -- -D warnings` passed. This is cross-compilation evidence only; Ubuntu execution remains pending exact-SHA CI.
+- `cargo clippy -p faultsift-file-access --target x86_64-unknown-linux-gnu --all-targets --all-features -- -D warnings` passed locally as cross-compilation evidence. Exact-SHA Ubuntu CI then passed the workspace tests, including the Linux buffered benchmark-harness cases, and compiled the benchmark target.
 - `.github/workflows/ci.yml` adds bench compilation to both Rust matrix platforms. It does not run performance measurements or enforce timing thresholds.
 - No unsafe Rust, backend control in production options, Linux mapping, line-index, parser, search, UI, or AI capability was added.
-- Independent review initially found a blocking concurrency timer boundary and two measurement-attribution warnings. All three were fixed, their affected measurements were rerun, and re-review returned `PASS_WITH_WARNINGS` with no Blocking issues; the remaining warnings are exact-SHA CI and Ubuntu runtime evidence only.
+- Independent review initially found a blocking concurrency timer boundary and two measurement-attribution warnings. All three were fixed, their affected measurements were rerun, and re-review returned `PASS_WITH_WARNINGS` with no Blocking issues. Its remaining exact-SHA CI and Ubuntu evidence warnings were resolved by [CI run 33030201461](https://github.com/VioletKiss/faultsift/actions/runs/33030201461): Frontend, Rust Windows, and Rust Ubuntu all passed for `9b086ccf8708138e15887612dea5bf4293455a0b`.
 
 ## Expected Files
 

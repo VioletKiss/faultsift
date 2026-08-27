@@ -14,7 +14,7 @@ This document tracks engineering milestones, product releases, current status, a
 | FaultSift planner/task/review skills | Current |
 | M0 / FS-001 Repository Bootstrap | Completed |
 | Rust, Tauri, React, and CI foundation | Current |
-| M1 / FS-002–FS-005 File Access | In Progress (FS-005) |
+| M1 / FS-002–FS-005 File Access | Completed |
 | Later Line Index, Parser, UI, and AI work | Not started |
 
 ## Two Independent Numbering Systems
@@ -33,6 +33,8 @@ Engineering milestones use `M0`, `M1`, `M2`, and so on. A milestone groups depen
 | M3 — Patterns | Normalization, fingerprints, counts, first/last seen, and samples | FS-020–FS-022 |
 | M4 — Timeline | WARN, ERROR, and pattern time buckets | FS-030 |
 | M5 — Desktop MVP | File open, timeline, pattern list, and original context in the desktop workflow | FS-040 and focused follow-ups |
+
+M1 completed on 2026-08-27 after FS-002 through FS-005 passed local verification, independent review, and required Windows/Ubuntu CI. Later Line Index, Parser, UI, and AI work remains not started.
 
 Later search, anomaly, AI, correlation, and format-expansion work remains in the documented product direction but receives milestone numbers only when its design and dependencies are approved.
 

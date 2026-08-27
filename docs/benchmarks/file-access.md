@@ -125,7 +125,7 @@ CI compiles the bench on Windows and Ubuntu and runs the bounded integration tes
 
 ## Recorded Windows Baseline
 
-This baseline was captured from the tracked FS-005 working tree based on commit `ef8b977dd402c8edeebf1f70ffc4563c57d1e44e`; the harness reported `tracked_worktree_dirty=true`. It will be superseded by an exact committed-code run before FS-005 completion.
+The tabulated baseline was captured from the final tracked FS-005 source immediately before its implementation commit, based on `ef8b977dd402c8edeebf1f70ffc4563c57d1e44e`; the harness reported `tracked_worktree_dirty=true`. A complete confirmation run on the byte-identical implementation commit `9b086ccf8708138e15887612dea5bf4293455a0b` reported that exact SHA with `tracked_worktree_dirty=false` and again passed backend selection, the >4 GiB sparse check, all workloads, and bounded memory reporting. The table preserves one internally consistent calibration sample rather than mixing estimates from successive environmentally variable runs.
 
 Environment:
 
