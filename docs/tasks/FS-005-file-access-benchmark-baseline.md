@@ -1,7 +1,7 @@
 # FS-005: File Access Benchmark Baseline
 
-- Status: Proposed
-- Owner: Unassigned
+- Status: In Progress
+- Owner: Codex
 - Related ADRs: ADR-0003
 - Roadmap stage: M1 — File Access
 
@@ -61,16 +61,16 @@ ADR-0003 treats performance as product behavior but deliberately leaves the exac
 
 ## Acceptance Criteria
 
-- [ ] A deterministic benchmark harness runs on stable Rust through one documented command.
-- [ ] Sequential and seeded random access cover both `RangeView` and caller-buffer `read_at`.
-- [ ] Windows results distinguish automatic mapped access from forced-buffered access using diagnostics rather than assumptions.
+- [x] A deterministic benchmark harness runs on stable Rust through one documented command.
+- [x] Sequential and seeded random access cover both `RangeView` and caller-buffer `read_at`.
+- [x] Windows results distinguish automatic mapped access from forced-buffered access using diagnostics rather than assumptions.
 - [ ] Linux compiles and runs the buffered benchmark path without any mapping implementation.
-- [ ] Benchmark cases use bounded live views, buffers, fixture generation, and concurrency independent of total file size.
-- [ ] Greater-than-4-GiB coordinate coverage uses a bounded sparse fixture and is clearly separated from populated-file throughput results.
-- [ ] The recorded baseline includes environment, fixture, access-pattern, cache-condition, backend, latency/throughput, and available memory observations.
-- [ ] A conservative, configurable named default for `max_view_bytes` is documented with its resource rationale and evidence.
+- [x] Benchmark cases use bounded live views, buffers, fixture generation, and concurrency independent of total file size.
+- [x] Greater-than-4-GiB coordinate coverage uses a bounded sparse fixture and is clearly separated from populated-file throughput results.
+- [x] The recorded baseline includes environment, fixture, access-pattern, cache-condition, backend, latency/throughput, and available memory observations.
+- [x] A conservative, configurable named default for `max_view_bytes` is documented with its resource rationale and evidence.
 - [ ] CI or its existing Rust jobs compile the benchmark harness on Windows and Ubuntu without enforcing noisy timing thresholds.
-- [ ] No benchmark adds or changes file-access semantics, unsafe boundaries, or later product capabilities.
+- [x] No benchmark adds or changes file-access semantics, unsafe boundaries, or later product capabilities.
 
 ## Test Cases
 
@@ -99,6 +99,31 @@ cargo bench -p faultsift-file-access --bench byte_access
 ```
 
 Review the generated baseline document and confirm that it reports actual backend diagnostics, environment, fixture construction, cache limitations, and memory methodology. External Windows/Ubuntu CI compilation must be reported separately and must not be claimed as passed from a local benchmark run.
+
+## Local Completion Evidence
+
+Implementation and Windows local verification completed on 2026-08-27. Independent review returned `PASS_WITH_WARNINGS`; only exact-SHA remote CI and Ubuntu runtime evidence remain pending.
+
+- Criterion 0.7.0 is a benchmark-only dev-dependency with default features disabled and only `cargo_bench_support` enabled. Version 0.7 was selected over 0.8 because 0.8 unconditionally introduced a native C build dependency that prevented the supported Windows-to-Linux bench cross-check without an unrelated cross-C toolchain.
+- The populated fixture defaults to 64 MiB, streams deterministic bytes through a 1 MiB setup buffer, and uses hard maximums of 1 GiB fixture size and 256 MiB workload size for manual overrides.
+- Sequential and xorshift64* seeded-random ranges use fixed seed `0x46533030355f5255`. Tests prove repeated generation is identical and a different seed changes the sequence.
+- The Windows full run reported `Buffered(IncompatibleWriter)` for the forced case and `Mapped` with no fallback for the automatic case. Backends are measured serially against the same fixture so the mapped stability handle cannot interfere with the writer used to prove buffered fallback.
+- The open-latency group acquires its forced-buffered writer guard outside the timed loop, so writer setup is excluded and both cases time only snapshot/backend establishment. Benchmark dirty metadata checks both unstaged and staged tracked changes against `HEAD`.
+- The full warm-cache run covered `view` and reused caller-buffer `read_at`, 4 KiB / 64 KiB / 1 MiB / 8 MiB ranges, sequential and seeded-random patterns, and concurrency 1 / 4. The concurrency timer starts before the main thread releases the worker start barrier; the corrected concurrency group was rerun after independent review. No cold-cache claim or timing threshold was made.
+- The >4-GiB fixture reported logical length 4,295,032,832 bytes, confirmed the Windows sparse flag, verified both boundary sentinels, selected `Mapped`, increased VAS by its logical length while open, and returned VAS to the prior level after drop without a corresponding RSS increase.
+- `DEFAULT_MAX_VIEW_BYTES` and `FileAccessOptions::default()` use a 1 MiB bound. The baseline shows that 8 MiB has no consistent copied-byte advantage while increasing each possible buffered live view by 8×; the value is documented as a resource guard, not a performance target.
+- `cargo fmt --all -- --check` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `cargo test -p faultsift-file-access` passed: 48 tests, 0 failures.
+- `cargo test --workspace` passed: 49 tests, 0 failures.
+- `cargo check -p faultsift-file-access --benches` passed.
+- `cargo bench -p faultsift-file-access --bench byte_access --no-run` passed.
+- `cargo bench -p faultsift-file-access --bench byte_access` passed locally on Windows with Criterion 0.7.0. The recorded result remains explicitly tied to the current tracked working tree and will be rerun for the exact implementation commit before completion.
+- `cargo check -p faultsift-file-access --target x86_64-unknown-linux-gnu --benches` passed.
+- `cargo clippy -p faultsift-file-access --target x86_64-unknown-linux-gnu --all-targets --all-features -- -D warnings` passed. This is cross-compilation evidence only; Ubuntu execution remains pending exact-SHA CI.
+- `.github/workflows/ci.yml` adds bench compilation to both Rust matrix platforms. It does not run performance measurements or enforce timing thresholds.
+- No unsafe Rust, backend control in production options, Linux mapping, line-index, parser, search, UI, or AI capability was added.
+- Independent review initially found a blocking concurrency timer boundary and two measurement-attribution warnings. All three were fixed, their affected measurements were rerun, and re-review returned `PASS_WITH_WARNINGS` with no Blocking issues; the remaining warnings are exact-SHA CI and Ubuntu runtime evidence only.
 
 ## Expected Files
 

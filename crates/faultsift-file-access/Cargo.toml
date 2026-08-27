@@ -14,6 +14,13 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_WindowsProgramming",
 ] }
 
+[dev-dependencies]
+criterion = { version = "0.7.0", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "byte_access"
+harness = false
+
 # This crate must be able to host narrowly scoped Windows platform FFI
 # exceptions. It therefore mirrors the workspace lints while using `deny`
 # instead of the workspace's non-overridable `forbid` for unsafe code.

@@ -14,7 +14,8 @@ This document tracks engineering milestones, product releases, current status, a
 | FaultSift planner/task/review skills | Current |
 | M0 / FS-001 Repository Bootstrap | Completed |
 | Rust, Tauri, React, and CI foundation | Current |
-| FaultSift business implementation | Not started |
+| M1 / FS-002–FS-005 File Access | In Progress (FS-005) |
+| Later Line Index, Parser, UI, and AI work | Not started |
 
 ## Two Independent Numbering Systems
 
@@ -27,7 +28,7 @@ Engineering milestones use `M0`, `M1`, `M2`, and so on. A milestone groups depen
 | Milestone | Intended outcome | Representative tasks |
 |---|---|---|
 | M0 — Repository Foundation | Governance, workspace shell, toolchain, local verification, and initial CI | FS-001 |
-| M1 — File Access | Read-only huge-file access, line boundaries, bounded index, and raw ranges | FS-002–FS-005 |
+| M1 — File Access | Read-only huge-file byte access, stable snapshots, platform backends, and a reproducible benchmark baseline | FS-002–FS-005 |
 | M2 — Java Parsing | Java headers and multiline exception events | FS-010–FS-011 |
 | M3 — Patterns | Normalization, fingerprints, counts, first/last seen, and samples | FS-020–FS-022 |
 | M4 — Timeline | WARN, ERROR, and pattern time buckets | FS-030 |

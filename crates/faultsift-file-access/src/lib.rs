@@ -24,6 +24,6 @@ pub use diagnostics::{BackendKind, FileAccessDiagnostics, MappingFallbackReason}
 pub use error::{FileAccessError, FileAccessResult};
 pub use identity::FileIdentity;
 pub use lifecycle::{SnapshotState, SnapshotValidation, StaleReason, ValidationTarget};
-pub use options::FileAccessOptions;
+pub use options::{DEFAULT_MAX_VIEW_BYTES, FileAccessOptions};
 pub use range::{ByteLength, ByteOffset, ByteRange};
 pub use snapshot::{FileSnapshot, RangeView, SnapshotGeneration};
