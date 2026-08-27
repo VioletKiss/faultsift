@@ -10,7 +10,9 @@ It does not define product priority, release numbers, or the scope of a particul
 
 M0 established the Rust workspace, the Tauri 2 desktop shell under `apps/desktop/src-tauri`, the React + TypeScript frontend directly under `apps/desktop`, and the Tauri-independent `faultsift-core` crate. The shell contains no FaultSift business capability.
 
-[ADR-0003](adr/0003-large-file-byte-access-strategy.md) establishes `faultsift-file-access` as the infrastructure layer below `faultsift-core`. The safe buffered baseline, snapshot lifecycle, conditional Windows mapping backend, and reproducible benchmark baseline are implemented: regular files have a fixed captured identity, length, and opaque generation; Windows identity uses the opened handle's complete volume serial number and 128-bit file ID; explicit validation can make a snapshot permanently stale; and `reopen()` creates a separate generation. On 64-bit Windows, non-empty resolved targets on fixed local NTFS or ReFS volumes may use a read-only whole-file mapping after a restrictive stability handle proves compatible sharing; all uncertainty or mapping failure retains the already-open buffered snapshot. Checked `u64` byte ranges, bounded views, and caller-buffer reads remain the only data-access concepts. `DEFAULT_MAX_VIEW_BYTES` is a configurable 1 MiB resource guard supported by the FS-005 warm-cache baseline, not a performance promise. Other remaining components in this document likewise describe approved target boundaries rather than implemented features.
+[ADR-0003](adr/0003-large-file-byte-access-strategy.md) establishes `faultsift-file-access` as the byte-only infrastructure layer below core consumers. The safe buffered baseline, snapshot lifecycle, conditional Windows mapping backend, and reproducible benchmark baseline are implemented: regular files have a fixed captured identity, length, and opaque generation; Windows identity uses the opened handle's complete volume serial number and 128-bit file ID; explicit validation can make a snapshot permanently stale; and `reopen()` creates a separate generation. On 64-bit Windows, non-empty resolved targets on fixed local NTFS or ReFS volumes may use a read-only whole-file mapping after a restrictive stability handle proves compatible sharing; all uncertainty or mapping failure retains the already-open buffered snapshot. Checked `u64` byte ranges, bounded views, and caller-buffer reads remain its only data-access concepts. `DEFAULT_MAX_VIEW_BYTES` is a configurable 1 MiB resource guard supported by the FS-005 warm-cache baseline, not a performance promise.
+
+[ADR-0004](adr/0004-physical-line-access-and-adaptive-sparse-index.md) establishes `faultsift-line-access` as the independent safe-Rust layer above File Access. Its physical-line contract, content-bearing bounded cursor, complete adaptive sparse index, ready-only exact lookup, snapshot binding, and memory-only first implementation are approved, while implementation remains not started. Other remaining components in this document likewise describe approved target boundaries rather than implemented features.
 
 ## System Context
 
@@ -20,6 +22,9 @@ The target desktop structure is:
 apps/desktop/ → apps/desktop/src-tauri/ ┐
                                         ├→ crates/faultsift-core/
 future CLI ─────────────────────────────┘           │
+                                                    ▼
+                                  crates/faultsift-line-access/
+                                                    │
                                                     ▼
                                   crates/faultsift-file-access/
                                                     │
@@ -54,7 +59,7 @@ The documented architecture identifies these logical responsibilities:
 | Component | Responsibility |
 |---|---|
 | File Access / FileSnapshot | Stable, read-only, bounded access to local file bytes |
-| LineIndexer | Locate lines or ranges without retaining all raw lines |
+| Physical Line Access / LineIndex | Stream physical-line content and locate exact lines or ranges without retaining all raw lines |
 | EventParser | Parse timestamps, levels, threads, loggers, messages, identifiers, and logical event boundaries |
 | PatternMiner | Normalize dynamic values and form similar-event patterns |
 | TimelineAggregator | Aggregate WARN, ERROR, exception, and later pattern activity into time buckets |
@@ -62,14 +67,16 @@ The documented architecture identifies these logical responsibilities:
 | SearchEngine | Later provide text, regex, field, and time-range queries |
 | AIContextBuilder | Select and structure incident evidence for optional AI analysis |
 
-These are logical boundaries, not yet a decision that every component must be a separate Rust crate. Physical package boundaries require an approved design or ADR.
+`faultsift-file-access`, `faultsift-line-access`, and `faultsift-core` are accepted physical crate boundaries. The other entries remain logical boundaries; they do not imply a separate crate without another approved design or ADR.
 
 ## Processing Data Flow
 
 ```text
 local file bytes
       ↓
-bounded file access and line boundaries
+bounded byte access
+      ↓
+physical-line streaming and adaptive sparse line index
       ↓
 logical event assembly
       ├── Java header fields
@@ -118,9 +125,30 @@ The architecture deliberately does not select a Windows mapping crate or binding
 
 The workspace default continues to forbid unsafe Rust. Only the audited Windows platform FFI modules `identity.rs` and `mapping.rs` inside `faultsift-file-access` contain reviewed, minimal unsafe boundaries. They isolate the full Windows file-identity query, resolved-volume eligibility queries, read-only mapping creation, immutable slice construction, and deterministic unmapping. Unsafe Rust anywhere else is a blocking architecture violation unless superseded by another accepted ADR.
 
+## Physical Line Access and Index
+
+[ADR-0004](adr/0004-physical-line-access-and-adaptive-sparse-index.md) establishes these boundaries:
+
+- `faultsift-line-access` is a safe-Rust crate between File Access and core, future parser, future search, CLI, or adapter consumers. It depends on `faultsift-file-access` and does not depend on `faultsift-core`, Tauri, React, Parser, Search, or AI code.
+- File Access remains byte-only. Physical newline recognition, line numbers, line ranges, descriptors, cursor state, and index errors belong to Line Access.
+- LF terminates a physical line. An immediately preceding CR forms one CRLF terminator and is excluded from content; a lone CR is content. The layer does not decode UTF-8 and preserves invalid bytes and NULs.
+- An empty file has zero lines. A terminal LF or CRLF does not create a fictitious trailing empty line. A final non-empty byte sequence without LF is an unterminated line.
+- `PhysicalLineCursor` is a content-bearing bounded streaming cursor. It supplies ordered borrowed content chunks from a fixed reusable buffer and returns a complete immutable descriptor only when the line boundary is known. Empty lines may supply no content chunks. A failed visitor or read does not yield a partial descriptor or silently resume the cursor.
+- A physical line need not fit in one allocation or `RangeView`. Arbitrarily long lines are streamed as more bounded chunks and are not line-access errors.
+- A `LineDescriptor` identifies its snapshot generation, zero-based line number, content range, physical range, and terminator. A `LineSpan` represents one half-open line range and one contiguous physical byte range without retaining a line collection.
+- Exact line-number lookup, exact line-range lookup, and exact total line count are available only after one complete eager index build. Sequential cursor access does not require an index.
+- The sparse index starts at stride 256 and has an explicit checkpoint budget. When its checkpoint ceiling would be exceeded, it compacts in place by retaining every other checkpoint and doubling stride. Total line count remains exact and independent of checkpoint density.
+- Checkpoint storage is bounded by its configured budget, plus fixed metadata and bounded per-builder or per-lookup scan buffers. The architecture does not prescribe a serialized layout, compressed encoding, hierarchical structure, or byte-for-byte process RSS bound.
+- Build is synchronous, single-threaded, and single-pass. A chunk-boundary control callback reports monotonic progress and may cancel without producing a partial index, changing snapshot lifecycle, or enabling resume. Adapters may run the synchronous build on their own worker.
+- A ready `LineIndex` owns the `Arc<FileSnapshot>` from which it was built. It remains bound to that snapshot instance, identity, generation, captured length, lifecycle, and backend resources. `reopen()` requires a new index.
+- Stale snapshots reject every index or cursor operation that needs source bytes or local scanning. Completed index metadata remains inspectable, but checkpoints and old descriptors never authorize stale or cross-generation reads. Line Access does not add implicit per-lookup validation or refresh.
+- Ready lookup selects the nearest checkpoint and scans locally with bounded memory. No O(1) lookup or fixed byte-latency guarantee is made. Offset-to-containing-line lookup and approximate seek are deferred.
+- The first index is process-local and memory-only. Persistence, sidecars, cache directories, serialization, partial files, resume, recovery, and disk-format versioning are deferred.
+- Checkpoint budget and scan-chunk size are explicit non-zero resource options. No named defaults are approved until a reproducible Line Access benchmark provides evidence for a separate decision.
+
 ## Event and Parsing Invariants
 
-The initial parser focus is Java application logs. A stack trace containing frames, `Caused by`, `Suppressed`, or common-frame omission markers belongs to one logical event.
+The initial parser focus is Java application logs. Parser implementations consume the unified physical-line contract from `faultsift-line-access` and must not reinterpret or independently trim LF/CRLF terminators. A stack trace containing frames, `Caused by`, `Suppressed`, or common-frame omission markers belongs to one logical event.
 
 Relevant file and parser designs must address the applicable cases among:
 
@@ -163,19 +191,26 @@ The intended dependency direction is:
 
 ```text
 desktop UI → Tauri adapter ┐
-                           ├→ faultsift-core → faultsift-file-access → OS file APIs
-future CLI ────────────────┘
+                           ├→ faultsift-core ────────────┐
+future CLI ────────────────┘                              │
+future parser / search ──────────────────────────────────┤
+                                                        ▼
+                                          faultsift-line-access
+                                                        │
+                                                        ▼
+                                          faultsift-file-access
+                                                        │
+                                                        ▼
+                                                   OS file APIs
 
 AI adapter ← selected structured analysis outputs
 ```
 
-`faultsift-core` owns domain and orchestration behavior. `faultsift-file-access` owns file snapshots and backend-neutral byte ranges. Neither layer depends on desktop UI concepts. React must not become a second implementation of file access, parsing, indexing, search, pattern, timeline, or anomaly logic.
+`faultsift-core` owns domain and orchestration behavior. `faultsift-line-access` owns physical-line streaming and indexing. `faultsift-file-access` owns file snapshots and backend-neutral byte ranges. None of these core layers depends on desktop UI concepts. Dependencies never point from File Access back to Line Access or from Line Access back to core/parser/search consumers. React must not become a second implementation of file access, parsing, indexing, search, pattern, timeline, or anomaly logic.
 
 ## Architectural Open Questions
 
-- Beyond the accepted `faultsift-core` and `faultsift-file-access` boundary, what future Rust crate splits are justified by demonstrated contracts?
-- Which line-index strategy balances lookup latency and bounded memory: full, sparse, lazy, or a hybrid?
-- Are indexes transient or persisted, and if persisted, what invalidation and versioning rules apply?
+- Beyond the accepted `faultsift-core`, `faultsift-line-access`, and `faultsift-file-access` boundaries, what future Rust crate splits are justified by demonstrated contracts?
 - What precisely defines pattern identity, especially for exception type, message normalization, and stack context?
 - What timestamp, timezone, malformed-input, and mixed-format rules form the Java parser contract?
 - What are the Tauri range-query and cancellation/progress contracts?

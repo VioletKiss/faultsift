@@ -25,3 +25,6 @@ Thumbs.db
 **/AGENTS.md
 !crates/faultsift-file-access/AGENTS.md
 docs/FaultSift-Codex-Development-Workflow.md
+
+# codegraph
+.codegraph/

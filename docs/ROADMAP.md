@@ -15,7 +15,8 @@ This document tracks engineering milestones, product releases, current status, a
 | M0 / FS-001 Repository Bootstrap | Completed |
 | Rust, Tauri, React, and CI foundation | Current |
 | M1 / FS-002–FS-005 File Access | Completed |
-| Later Line Index, Parser, UI, and AI work | Not started |
+| M2 / FS-006–FS-009 Line Access / Index | Planned; implementation not started |
+| Later Parser, UI, and AI work | Not started |
 
 ## Two Independent Numbering Systems
 
@@ -29,12 +30,13 @@ Engineering milestones use `M0`, `M1`, `M2`, and so on. A milestone groups depen
 |---|---|---|
 | M0 — Repository Foundation | Governance, workspace shell, toolchain, local verification, and initial CI | FS-001 |
 | M1 — File Access | Read-only huge-file byte access, stable snapshots, platform backends, and a reproducible benchmark baseline | FS-002–FS-005 |
-| M2 — Java Parsing | Java headers and multiline exception events | FS-010–FS-011 |
-| M3 — Patterns | Normalization, fingerprints, counts, first/last seen, and samples | FS-020–FS-022 |
-| M4 — Timeline | WARN, ERROR, and pattern time buckets | FS-030 |
-| M5 — Desktop MVP | File open, timeline, pattern list, and original context in the desktop workflow | FS-040 and focused follow-ups |
+| M2 — Line Access / Index | Bounded physical-line streaming, adaptive sparse indexing, exact ready lookup, and a reproducible benchmark baseline | FS-006–FS-009 |
+| M3 — Java Parsing | Java headers and multiline exception events | FS-010–FS-011 |
+| M4 — Patterns | Normalization, fingerprints, counts, first/last seen, and samples | FS-020–FS-022 |
+| M5 — Timeline | WARN, ERROR, and pattern time buckets | FS-030 |
+| M6 — Desktop MVP | File open, timeline, pattern list, and original context in the desktop workflow | FS-040 and focused follow-ups |
 
-M1 completed on 2026-08-27 after FS-002 through FS-005 passed local verification, independent review, and required Windows/Ubuntu CI. Later Line Index, Parser, UI, and AI work remains not started.
+M1 completed on 2026-08-27 after FS-002 through FS-005 passed local verification, independent review, and required Windows/Ubuntu CI. The M2 Line Access / Index architecture is accepted and its FS-006 through FS-009 implementation tasks are proposed; implementation has not started. Parser, UI, and AI work remains not started.
 
 Later search, anomaly, AI, correlation, and format-expansion work remains in the documented product direction but receives milestone numbers only when its design and dependencies are approved.
 
