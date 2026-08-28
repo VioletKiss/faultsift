@@ -889,6 +889,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "faultsift-line-access"
+version = "0.0.0"
+dependencies = [
+ "faultsift-file-access",
+]
+
+[[package]]
 name = "fdeflate"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"

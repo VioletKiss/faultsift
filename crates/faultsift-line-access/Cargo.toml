@@ -1,0 +1,12 @@
+[package]
+name = "faultsift-line-access"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+faultsift-file-access = { path = "../faultsift-file-access" }
+
+[lints]
+workspace = true

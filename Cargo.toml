@@ -3,6 +3,7 @@ members = [
     "apps/desktop/src-tauri",
     "crates/faultsift-core",
     "crates/faultsift-file-access",
+    "crates/faultsift-line-access",
 ]
 resolver = "2"
 
