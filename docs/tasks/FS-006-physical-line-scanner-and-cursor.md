@@ -1,6 +1,6 @@
 # FS-006: Physical Line Scanner and Cursor Foundation
 
-- Status: Proposed
+- Status: Completed
 - Owner: Unassigned
 - Related ADRs: ADR-0003, ADR-0004
 - Roadmap stage: M2 — Line Access / Index
@@ -63,17 +63,17 @@ Create the real `faultsift-line-access` crate with one bounded byte scanner and 
 
 ## Acceptance Criteria
 
-- [ ] `faultsift-line-access` is a buildable workspace member containing real scanner/cursor behavior and a scoped `AGENTS.md`, not placeholder modules.
-- [ ] The crate's normal dependency graph contains `faultsift-file-access` but no `faultsift-core`, Tauri, React, async runtime, text decoder, Parser, or Search dependency.
-- [ ] A cursor streams each non-empty line through ordered bounded borrowed chunks and returns one exact generation-tagged `LineDescriptor` after the line completes.
-- [ ] Empty files, empty lines, terminal newlines, and final unterminated lines follow ADR-0004 exactly without phantom lines.
-- [ ] LF, CRLF, lone CR, and CRLF split across scan buffers produce the correct content range, physical range, and terminator kind.
-- [ ] Invalid UTF-8, NUL, and arbitrary bytes are delivered unchanged without decoding or allocation into a complete owned line.
-- [ ] A line larger than the configured scan chunk is delivered through multiple chunks with memory independent of line length and without `LineTooLarge`.
-- [ ] Every line's chunk ranges are ordered, non-overlapping, gap-free, and concatenate exactly to its descriptor content range; terminator bytes are never delivered as content.
-- [ ] A visitor or read error produces no partial descriptor and makes subsequent cursor use return an explicit terminal-state error.
-- [ ] A stale snapshot prevents new cursor byte access through the existing typed stale behavior, and descriptors identify the original snapshot generation.
-- [ ] All crate code is safe Rust, and File Access byte/snapshot behavior is unchanged.
+- [x] `faultsift-line-access` is a buildable workspace member containing real scanner/cursor behavior and a scoped `AGENTS.md`, not placeholder modules.
+- [x] The crate's normal dependency graph contains `faultsift-file-access` but no `faultsift-core`, Tauri, React, async runtime, text decoder, Parser, or Search dependency.
+- [x] A cursor streams each non-empty line through ordered bounded borrowed chunks and returns one exact generation-tagged `LineDescriptor` after the line completes.
+- [x] Empty files, empty lines, terminal newlines, and final unterminated lines follow ADR-0004 exactly without phantom lines.
+- [x] LF, CRLF, lone CR, and CRLF split across scan buffers produce the correct content range, physical range, and terminator kind.
+- [x] Invalid UTF-8, NUL, and arbitrary bytes are delivered unchanged without decoding or allocation into a complete owned line.
+- [x] A line larger than the configured scan chunk is delivered through multiple chunks with memory independent of line length and without `LineTooLarge`.
+- [x] Every line's chunk ranges are ordered, non-overlapping, gap-free, and concatenate exactly to its descriptor content range; terminator bytes are never delivered as content.
+- [x] A visitor or read error produces no partial descriptor and makes subsequent cursor use return an explicit terminal-state error.
+- [x] A stale snapshot prevents new cursor byte access through the existing typed stale behavior, and descriptors identify the original snapshot generation.
+- [x] All crate code is safe Rust, and File Access byte/snapshot behavior is unchanged.
 
 ## Test Cases
 
@@ -103,6 +103,27 @@ rg -n '\bunsafe\s+(fn|trait|impl|extern)|\bunsafe\s*\{' crates/faultsift-line-ac
 ```
 
 The unsafe scan must return no matches. Review the dependency tree and source to confirm no complete-line allocation, hidden scan-size default, duplicate newline state machine, implicit snapshot validation, or later M2 capability is present. Required Windows and Ubuntu CI must pass for the exact pushed commit before the task completes.
+
+## Completion Evidence
+
+Implemented, independently reviewed, and remotely verified on 2026-08-28.
+
+- The new crate depends normally only on `faultsift-file-access`; no third-party dependency was added. Its scoped `AGENTS.md` records the physical-line-only, bounded-memory, safe-Rust, dependency, snapshot-lifecycle, and single-newline-scanner rules.
+- `PhysicalLineCursor` owns one reusable `Box<[u8]>` sized by explicit non-zero `ScanOptions`. Scanner-owned memory is `O(scan_chunk_bytes)`, independent of file size, line count, and line length.
+- The shared internal `ByteScanner` recognizes LF, CRLF, lone CR, and EOF without decoding. A CR at the end of a scan buffer remains pending until the next byte or EOF decides whether it is terminator or content.
+- `visit_next_line` delivers borrowed ordered content chunks with absolute `ByteRange` coordinates and preserves caller visitor errors through generic `VisitLineError<E>`. Visitor, read, or scanner failure returns no partial descriptor and terminally fails the cursor.
+- Every active line visit checks the existing snapshot state without implicit `validate()`, reopen, or refresh. A regression test proves a stale transition rejects later lines already prefetched into the scanner buffer; another proves the captured boundary hides appended bytes until a new snapshot is opened.
+- Focused tests passed: 17 tests, 0 failures. Coverage includes the required newline/counting table, empty lines, every small CRLF/chunk split, arbitrary bytes, descriptor/chunk invariants, 781 exhaustive short inputs across three scan sizes, a streamed 2 MiB huge line with more than 8,000 chunks, visitor/read terminal failure, stale lifecycle, captured boundary, and real cursor/scanner descriptors crossing 4 GiB through a test-only synthetic window.
+- `cargo fmt --all -- --check` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `cargo test -p faultsift-line-access` passed: 17 tests, 0 failures.
+- `cargo test --workspace` passed.
+- `cargo tree -p faultsift-line-access --edges normal` showed only the expected direct `faultsift-file-access` dependency.
+- `cargo clippy --target x86_64-unknown-linux-gnu -p faultsift-line-access --all-targets --all-features -- -D warnings` passed as local Linux cross-compilation evidence.
+- `git diff --check` passed, and the required unsafe scan returned no matches under `crates/faultsift-line-access/**/*.rs`.
+- Independent `faultsift-review` initially returned `BLOCKING` for prefetched bytes bypassing a later stale transition and missing scanner-level >4-GiB evidence. Both defects were fixed with regression tests; independent re-review returned `PASS` with no Blocking issues, warnings, memory concerns, or scope violations.
+- Implementation commit `7b7dbd8b0a4931574e6cf5f048ed45b1be1a9090` passed exact-SHA [GitHub Actions run 33134172985](https://github.com/VioletKiss/faultsift/actions/runs/33134172985): Frontend quality, Rust Windows, and Rust Ubuntu all completed with `success`.
+- No `LineIndex`, checkpoint, lookup, parser, search, persistence, parallelism, async, Tauri, React, or AI capability was introduced.
 
 ## Expected Files
 
@@ -135,4 +156,3 @@ None. Exact Rust naming and generic visitor-error ergonomics may be chosen durin
 - generation and stale behavior through `Arc<FileSnapshot>`;
 - one reusable scanner suitable for FS-007 rather than duplicated boundary logic;
 - dependency direction, safe-Rust enforcement, and strict exclusion of later M2 and product capabilities.
-
