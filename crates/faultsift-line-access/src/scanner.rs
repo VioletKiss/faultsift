@@ -29,6 +29,7 @@ pub(crate) struct ByteScanner {
     buffer_start: u64,
     buffer_len: usize,
     buffer_pos: usize,
+    buffer_end_reported: bool,
     captured_length: ByteLength,
 }
 
@@ -53,6 +54,7 @@ impl ByteScanner {
             buffer_start: 0,
             buffer_len: 0,
             buffer_pos: 0,
+            buffer_end_reported: false,
             captured_length,
         })
     }
@@ -77,12 +79,21 @@ impl ByteScanner {
         self.buffer_start = start;
         self.buffer_len = bytes.len();
         self.buffer_pos = 0;
+        self.buffer_end_reported = false;
         self.captured_length = captured_length;
     }
 
     pub(crate) fn scan_next_line<E>(
         &mut self,
         visitor: &mut impl FnMut(LineContentChunk<'_>) -> Result<(), E>,
+    ) -> Result<Option<ScannedLine>, ScanError<E>> {
+        self.scan_next_line_with_chunk_boundaries(visitor, &mut |_| Ok(()))
+    }
+
+    pub(crate) fn scan_next_line_with_chunk_boundaries<E>(
+        &mut self,
+        visitor: &mut impl FnMut(LineContentChunk<'_>) -> Result<(), E>,
+        on_chunk_boundary: &mut impl FnMut(u64) -> Result<(), LineAccessError>,
     ) -> Result<Option<ScannedLine>, ScanError<E>> {
         let line_start = self.position().map_err(ScanError::Scanner)?;
         if line_start == self.captured_length.get() {
@@ -93,10 +104,13 @@ impl ByteScanner {
         let mut pending_cr = None;
 
         loop {
-            if !self.ensure_data().map_err(|error| match error {
-                LineAccessError::FileAccess(source) => ScanError::FileAccess(source),
-                other => ScanError::Scanner(other),
-            })? {
+            if !self
+                .ensure_data(on_chunk_boundary)
+                .map_err(|error| match error {
+                    LineAccessError::FileAccess(source) => ScanError::FileAccess(source),
+                    other => ScanError::Scanner(other),
+                })?
+            {
                 if let Some(cr_offset) = pending_cr.take() {
                     Self::emit(visitor, cr_offset, &CR_BYTE)?;
                     content_end = cr_offset.checked_add(1).ok_or_else(|| {
@@ -256,6 +270,20 @@ impl ByteScanner {
         }
     }
 
+    pub(crate) fn report_consumed_chunk_boundary(
+        &mut self,
+        on_chunk_boundary: &mut impl FnMut(u64) -> Result<(), LineAccessError>,
+    ) -> Result<(), LineAccessError> {
+        if self.buffer_len == 0 || self.buffer_pos != self.buffer_len || self.buffer_end_reported {
+            return Ok(());
+        }
+
+        let bytes_scanned = self.position()?;
+        on_chunk_boundary(bytes_scanned)?;
+        self.buffer_end_reported = true;
+        Ok(())
+    }
+
     fn position(&self) -> Result<u64, LineAccessError> {
         self.buffer_start.checked_add(self.buffer_pos as u64).ok_or(
             LineAccessError::CoordinateOverflow {
@@ -265,7 +293,10 @@ impl ByteScanner {
         )
     }
 
-    fn ensure_data(&mut self) -> Result<bool, LineAccessError> {
+    fn ensure_data(
+        &mut self,
+        on_chunk_boundary: &mut impl FnMut(u64) -> Result<(), LineAccessError>,
+    ) -> Result<bool, LineAccessError> {
         if self.buffer_pos < self.buffer_len {
             return Ok(true);
         }
@@ -274,6 +305,8 @@ impl ByteScanner {
         if offset == self.captured_length.get() {
             return Ok(false);
         }
+
+        self.report_consumed_chunk_boundary(on_chunk_boundary)?;
 
         let read = self
             .snapshot
@@ -288,6 +321,7 @@ impl ByteScanner {
         self.buffer_start = offset;
         self.buffer_len = read;
         self.buffer_pos = 0;
+        self.buffer_end_reported = false;
         Ok(true)
     }
 

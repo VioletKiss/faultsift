@@ -31,6 +31,26 @@ pub enum LineAccessError {
         requested: ByteLength,
         source: TryReserveError,
     },
+    InvalidCheckpointBudgetBytes {
+        value: ByteLength,
+        minimum: ByteLength,
+    },
+    CheckpointCountNotRepresentable {
+        count: u64,
+    },
+    CheckpointAllocationFailed {
+        max_checkpoints: u64,
+        source: TryReserveError,
+    },
+    CheckpointCapacityExceeded {
+        capacity: u64,
+        max_checkpoints: u64,
+    },
+    CheckpointArithmeticOverflow,
+    StrideOverflow {
+        current_stride: u64,
+    },
+    IndexBuildCancelled,
     CoordinateOverflow {
         offset: ByteOffset,
         length: ByteLength,
@@ -68,6 +88,38 @@ impl fmt::Display for LineAccessError {
                 "failed to allocate {} scan buffer bytes: {source}",
                 requested.get()
             ),
+            Self::InvalidCheckpointBudgetBytes { value, minimum } => write!(
+                formatter,
+                "checkpoint_budget_bytes must hold at least two u64 offsets ({} bytes), got {}",
+                minimum.get(),
+                value.get()
+            ),
+            Self::CheckpointCountNotRepresentable { count } => write!(
+                formatter,
+                "maximum checkpoint count {count} is not representable as usize"
+            ),
+            Self::CheckpointAllocationFailed {
+                max_checkpoints,
+                source,
+            } => write!(
+                formatter,
+                "failed to allocate storage for {max_checkpoints} checkpoints: {source}"
+            ),
+            Self::CheckpointCapacityExceeded {
+                capacity,
+                max_checkpoints,
+            } => write!(
+                formatter,
+                "checkpoint storage capacity {capacity} exceeds configured ceiling {max_checkpoints}"
+            ),
+            Self::CheckpointArithmeticOverflow => {
+                formatter.write_str("checkpoint resource arithmetic overflowed")
+            }
+            Self::StrideOverflow { current_stride } => write!(
+                formatter,
+                "checkpoint stride overflowed while doubling {current_stride}"
+            ),
+            Self::IndexBuildCancelled => formatter.write_str("line-index build was cancelled"),
             Self::CoordinateOverflow { offset, length } => write!(
                 formatter,
                 "line coordinate arithmetic overflowed at offset {} with value {}",
@@ -102,7 +154,8 @@ impl fmt::Display for LineAccessError {
 impl Error for LineAccessError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::ScanBufferAllocationFailed { source, .. } => Some(source),
+            Self::ScanBufferAllocationFailed { source, .. }
+            | Self::CheckpointAllocationFailed { source, .. } => Some(source),
             Self::FileAccess(source) => Some(source),
             _ => None,
         }
