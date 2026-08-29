@@ -1,6 +1,6 @@
 # FS-007: Adaptive Sparse Line Index Build
 
-- Status: Proposed
+- Status: Completed
 - Owner: Unassigned
 - Related ADRs: ADR-0003, ADR-0004
 - Roadmap stage: M2 — Line Access / Index
@@ -63,20 +63,20 @@ FS-006 supplies the approved physical-line scanner and cursor semantics. [ADR-00
 
 ## Acceptance Criteria
 
-- [ ] Invalid checkpoint or scan options fail with typed errors before the first source scan, and `LineIndexOptions` has no `Default` implementation or hidden magic-number fallback.
-- [ ] Build performs one complete sequential scan using the FS-006 scanner and returns one ready memory-only `LineIndex` only after the captured boundary is consumed.
-- [ ] Ready metadata reports exact generation, captured length, total physical-line count, final stride, checkpoint count, checkpoint budget, and scan-chunk size.
-- [ ] Initial stride is 256 and every compaction doubles it while preserving valid ordered checkpoints for the new stride.
-- [ ] Checkpoint count/capacity never exceeds the derived ceiling, including pathological short-line input and repeated compaction.
-- [ ] Compaction reuses bounded storage and does not allocate a comparable temporary checkpoint collection or require shrink.
-- [ ] Empty, LF/CRLF, blank-line, and final-unterminated fixtures produce exact total counts without phantom lines.
-- [ ] A newline-dense fixture can trigger multiple compactions while exact total count and retained checkpoint coordinates remain correct.
-- [ ] Progress callbacks occur at scan-chunk boundaries, remain monotonic, expose only observation/control data, and do not scale with physical-line count for a newline-only fixture.
-- [ ] Successful final progress reports captured snapshot length and exact total line count.
-- [ ] Cancellation returns `IndexBuildCancelled`, returns no index or coverage, leaves the snapshot lifecycle unchanged, and requires a new build to retry.
-- [ ] Snapshot stale/read/allocation/arithmetic failure returns a typed error and no index.
-- [ ] `LineIndex` retains the original `Arc<FileSnapshot>` and cannot bind or switch to a reopened generation.
-- [ ] No random lookup, persistence, parallel scan, resource defaults, Parser, Search, Tauri, UI, or AI behavior is introduced.
+- [x] Invalid checkpoint or scan options fail with typed errors before the first source scan, and `LineIndexOptions` has no `Default` implementation or hidden magic-number fallback.
+- [x] Build performs one complete sequential scan using the FS-006 scanner and returns one ready memory-only `LineIndex` only after the captured boundary is consumed.
+- [x] Ready metadata reports exact generation, captured length, total physical-line count, final stride, checkpoint count, checkpoint budget, and scan-chunk size.
+- [x] Initial stride is 256 and every compaction doubles it while preserving valid ordered checkpoints for the new stride.
+- [x] Checkpoint count/capacity never exceeds the derived ceiling, including pathological short-line input and repeated compaction.
+- [x] Compaction reuses bounded storage and does not allocate a comparable temporary checkpoint collection or require shrink.
+- [x] Empty, LF/CRLF, blank-line, and final-unterminated fixtures produce exact total counts without phantom lines.
+- [x] A newline-dense fixture can trigger multiple compactions while exact total count and retained checkpoint coordinates remain correct.
+- [x] Progress callbacks occur at scan-chunk boundaries, remain monotonic, expose only observation/control data, and do not scale with physical-line count for a newline-only fixture.
+- [x] Successful final progress reports captured snapshot length and exact total line count.
+- [x] Cancellation returns `IndexBuildCancelled`, returns no index or coverage, leaves the snapshot lifecycle unchanged, and requires a new build to retry.
+- [x] Snapshot stale/read/allocation/arithmetic failure returns a typed error and no index.
+- [x] `LineIndex` retains the original `Arc<FileSnapshot>` and cannot bind or switch to a reopened generation.
+- [x] No random lookup, persistence, parallel scan, resource defaults, Parser, Search, Tauri, UI, or AI behavior is introduced.
 
 ## Test Cases
 
@@ -107,6 +107,28 @@ rg -n '\bunsafe\s+(fn|trait|impl|extern)|\bunsafe\s*\{' crates/faultsift-line-ac
 ```
 
 Inspect focused tests or bounded instrumentation proving checkpoint ceiling and in-place compaction behavior. Inspect production source to confirm one shared scanner, no `Default` or hidden resource constants, no partial index state, and no internal thread/async runtime. Required Windows and Ubuntu CI must pass for the exact pushed commit.
+
+## Completion Evidence
+
+Implemented, independently reviewed, and remotely verified on 2026-08-29.
+
+- `LineIndexOptions` validates the explicit checkpoint budget and scan chunk before scanning. The checkpoint ceiling is `floor(checkpoint_budget_bytes / size_of::<u64>())`, must hold at least two offsets, and has checked `u64`/`usize` conversion. No `Default` or named resource fallback was added.
+- `LineIndex::build` and `build_with_control` own the exact input `Arc<FileSnapshot>`, capture its generation and length, reject a pre-stale snapshot before allocation or reading, and return a ready immutable index only after the captured boundary is completely scanned.
+- `PhysicalLineCursor` and the builder both call the existing crate-internal `ByteScanner`; the only production LF/CRLF and pending-CR state machine remains in `scanner.rs`. The builder discards content chunks and consumes the scanner's exact completed-line coordinates without retaining line bytes.
+- Checkpoints are one bounded `Vec<u64>` preallocated with `try_reserve_exact(max_checkpoints)`. A capacity larger than the ceiling is rejected. Candidate insertion checks the ceiling before `push`; compaction overwrites retained even-index checkpoints in place, truncates, and checked-doubles stride without another checkpoint collection or shrink.
+- Exact physical-line count remains independent of checkpoint density. Empty, LF, CRLF, lone CR, blank, terminal-LF, final-unterminated, invalid UTF-8, NUL, newline-dense, repeated-compaction, odd-checkpoint, stride-overflow, and beyond-4-GiB coordinate/count cases are covered.
+- Progress is emitted once per consumed bounded scanner buffer (including the exact empty EOF boundary), is monotonic, and finishes with captured length and exact line count. Long-line and newline-only tests prove callback frequency follows chunks rather than lines. Cancellation at first, middle, and final boundaries returns only `IndexBuildCancelled`, leaves the snapshot fresh, and requires a fresh full build retry.
+- Stale-before-build, stale-during-control, truncation/read failure, reopen isolation, retained snapshot identity, immutable stale metadata, and compile-time `Send + Sync` evidence are covered.
+- `cargo fmt --all -- --check` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `cargo test -p faultsift-line-access` passed 40 tests across four suites.
+- `cargo test --workspace` passed 97 tests across 24 suites.
+- `cargo tree -p faultsift-line-access --edges normal` showed only the expected direct `faultsift-file-access` dependency; no dependency was added or removed.
+- `cargo check -p faultsift-line-access --all-targets --all-features --target x86_64-unknown-linux-gnu` and the matching target Clippy command passed.
+- `git diff --check` passed, and the required unsafe scan returned no matches under `crates/faultsift-line-access/**/*.rs`.
+- Independent `faultsift-review` returned `PASS_WITH_WARNINGS` with no Blocking issue, material warning, memory concern, missing test, dependency concern, or scope violation. Its sole warning was the then-pending exact-pushed-commit CI evidence, resolved by the run below.
+- Implementation commit `832a68c083f8e96a3474aeec63055823b6b68b8a` passed exact-SHA [GitHub Actions run 33247749898](https://github.com/VioletKiss/faultsift/actions/runs/33247749898): Frontend quality, Rust Windows, and Rust Ubuntu all completed with `success`.
+- No line lookup, line-range lookup, cursor-from-line, bounded descriptor/span reader, benchmark, persistence, parallel scan, default resource policy, Parser, Search, Tauri, UI, or AI capability was introduced.
 
 ## Expected Files
 
@@ -139,4 +161,3 @@ None. Resource values remain caller-supplied; FS-009 will measure candidates but
 - progress frequency, monotonic fields, cancellation latency boundary, and no partial result;
 - snapshot ownership, stale failure, reopen isolation, and no implicit validation;
 - absence of lookup, persistence, parallelism, compression, defaults, and later product scope.
-

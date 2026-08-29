@@ -15,7 +15,7 @@ This document tracks engineering milestones, product releases, current status, a
 | M0 / FS-001 Repository Bootstrap | Completed |
 | Rust, Tauri, React, and CI foundation | Current |
 | M1 / FS-002–FS-005 File Access | Completed |
-| M2 / FS-006–FS-009 Line Access / Index | FS-006 completed; FS-007–FS-009 planned |
+| M2 / FS-006–FS-009 Line Access / Index | FS-006–FS-007 completed; FS-008–FS-009 planned |
 | Later Parser, UI, and AI work | Not started |
 
 ## Two Independent Numbering Systems
@@ -36,7 +36,7 @@ Engineering milestones use `M0`, `M1`, `M2`, and so on. A milestone groups depen
 | M5 — Timeline | WARN, ERROR, and pattern time buckets | FS-030 |
 | M6 — Desktop MVP | File open, timeline, pattern list, and original context in the desktop workflow | FS-040 and focused follow-ups |
 
-M1 completed on 2026-08-27 after FS-002 through FS-005 passed local verification, independent review, and required Windows/Ubuntu CI. The M2 Line Access / Index architecture is accepted. FS-006 completed on 2026-08-28 after local verification, independent review, and required Windows/Ubuntu CI; FS-007 through FS-009 remain planned and unimplemented. Parser, UI, and AI work remains not started.
+M1 completed on 2026-08-27 after FS-002 through FS-005 passed local verification, independent review, and required Windows/Ubuntu CI. The M2 Line Access / Index architecture is accepted. FS-006 completed on 2026-08-28 and FS-007 completed on 2026-08-29 after each passed local verification, independent review, and required Windows/Ubuntu CI. FS-008 and FS-009 remain planned and unimplemented. Parser, UI, and AI work remains not started.
 
 Later search, anomaly, AI, correlation, and format-expansion work remains in the documented product direction but receives milestone numbers only when its design and dependencies are approved.
 
