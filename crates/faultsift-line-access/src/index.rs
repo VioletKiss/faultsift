@@ -2,11 +2,16 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use faultsift_file_access::{
-    ByteLength, FileAccessError, FileSnapshot, SnapshotGeneration, SnapshotState,
+    ByteLength, ByteOffset, ByteRange, FileAccessError, FileSnapshot, SnapshotGeneration,
+    SnapshotState,
 };
 
 use crate::scanner::{ByteScanner, ScanError, ScannedLine};
-use crate::{LineAccessError, LineAccessResult, LineContentChunk, LineIndexOptions};
+use crate::types::checked_range;
+use crate::{
+    LineAccessError, LineAccessResult, LineContentChunk, LineDescriptor, LineIndexOptions,
+    LineNumber, LineRange, LineSpan, PhysicalSpanChunk, VisitBytesError,
+};
 
 /// First and only initial checkpoint stride approved for the eager index.
 pub const INITIAL_STRIDE: u64 = 256;
@@ -147,6 +152,123 @@ impl LineIndex {
         })
     }
 
+    /// Locates one exact zero-based physical line from the nearest checkpoint.
+    pub fn line(&self, line_number: LineNumber) -> LineAccessResult<LineDescriptor> {
+        ensure_snapshot_fresh(&self.snapshot)?;
+        if line_number.get() >= self.physical_line_count {
+            return Err(LineAccessError::LineNumberOutOfBounds {
+                line_number,
+                line_count: self.physical_line_count,
+            });
+        }
+
+        let (mut current_line, checkpoint_offset) = self.checkpoint_for(line_number)?;
+        let mut scanner = ByteScanner::new_at(
+            Arc::clone(&self.snapshot),
+            self.options.scan_options(),
+            ByteOffset::new(checkpoint_offset),
+        )?;
+
+        loop {
+            let scanned = scan_next_ignoring_content(&mut scanner)?.ok_or(
+                LineAccessError::UnexpectedScannerEof {
+                    offset: ByteOffset::new(self.snapshot_length.get()),
+                    snapshot_length: self.snapshot_length,
+                },
+            )?;
+            if current_line == line_number.get() {
+                ensure_snapshot_fresh(&self.snapshot)?;
+                return Ok(LineDescriptor::from_parts(
+                    self.generation,
+                    line_number,
+                    scanned.content_range,
+                    scanned.physical_range,
+                    scanned.terminator,
+                ));
+            }
+            current_line =
+                current_line
+                    .checked_add(1)
+                    .ok_or(LineAccessError::LineNumberOverflow {
+                        line_number: LineNumber::new(current_line),
+                    })?;
+        }
+    }
+
+    /// Locates one exact half-open line range as O(1)-sized metadata.
+    pub fn line_range(&self, line_range: LineRange) -> LineAccessResult<LineSpan> {
+        ensure_snapshot_fresh(&self.snapshot)?;
+        if line_range.end().get() > self.physical_line_count {
+            return Err(LineAccessError::LineRangeOutOfBounds {
+                range: line_range,
+                line_count: self.physical_line_count,
+            });
+        }
+
+        let physical_range = if line_range.is_empty() {
+            let anchor = if line_range.start().get() == self.physical_line_count {
+                self.snapshot_length.get()
+            } else {
+                self.find_line_start(line_range.start())?
+            };
+            checked_range(anchor, anchor)?
+        } else {
+            let last_number = LineNumber::new(line_range.end().get() - 1);
+            let last = self.line(last_number)?;
+            let start = if line_range.start() == last_number {
+                last.physical_range().offset().get()
+            } else {
+                self.find_line_start(line_range.start())?
+            };
+            checked_range(start, last.physical_range().end().get())?
+        };
+
+        ensure_snapshot_fresh(&self.snapshot)?;
+        Ok(LineSpan::from_parts(
+            self.generation,
+            line_range,
+            physical_range,
+        ))
+    }
+
+    /// Streams one descriptor's content bytes without its terminator.
+    pub fn visit_line_content<E>(
+        &self,
+        descriptor: &LineDescriptor,
+        mut visitor: impl FnMut(LineContentChunk<'_>) -> Result<(), E>,
+    ) -> Result<(), VisitBytesError<E>> {
+        if descriptor.generation() != self.generation {
+            return Err(LineAccessError::DescriptorGenerationMismatch {
+                expected: self.generation,
+                actual: descriptor.generation(),
+            }
+            .into());
+        }
+        ensure_snapshot_fresh(&self.snapshot)?;
+        self.visit_bytes(descriptor.content_range(), |range, bytes| {
+            visitor(LineContentChunk::new(range, bytes))
+        })
+    }
+
+    /// Streams one span's raw physical bytes, including every terminator.
+    pub fn visit_span_physical<E>(
+        &self,
+        span: &LineSpan,
+        mut visitor: impl FnMut(PhysicalSpanChunk<'_>) -> Result<(), E>,
+    ) -> Result<(), VisitBytesError<E>> {
+        if span.generation() != self.generation {
+            return Err(LineAccessError::SpanGenerationMismatch {
+                expected: self.generation,
+                actual: span.generation(),
+            }
+            .into());
+        }
+        ensure_snapshot_fresh(&self.snapshot)?;
+        self.visit_bytes(span.physical_range(), |range, bytes| {
+            visitor(PhysicalSpanChunk::new(range, bytes))
+        })
+    }
+
     /// Returns the exact completed physical-line count.
     #[must_use]
     pub const fn line_count(&self) -> u64 {
@@ -194,10 +316,127 @@ impl LineIndex {
     pub const fn snapshot(&self) -> &Arc<FileSnapshot> {
         &self.snapshot
     }
+
+    fn checkpoint_for(&self, line_number: LineNumber) -> LineAccessResult<(u64, u64)> {
+        let checkpoint_index_u64 = line_number
+            .get()
+            .checked_div(self.final_stride)
+            .ok_or(LineAccessError::CheckpointArithmeticOverflow)?;
+        let checkpoint_index = usize::try_from(checkpoint_index_u64)
+            .map_err(|_| LineAccessError::CheckpointArithmeticOverflow)?;
+        let checkpoint_line = checkpoint_index_u64
+            .checked_mul(self.final_stride)
+            .ok_or(LineAccessError::CheckpointArithmeticOverflow)?;
+        let checkpoint_offset = *self
+            .checkpoints
+            .get(checkpoint_index)
+            .ok_or(LineAccessError::CheckpointArithmeticOverflow)?;
+        Ok((checkpoint_line, checkpoint_offset))
+    }
+
+    fn find_line_start(&self, line_number: LineNumber) -> LineAccessResult<u64> {
+        let (mut current_line, checkpoint_offset) = self.checkpoint_for(line_number)?;
+        if current_line == line_number.get() {
+            ensure_snapshot_fresh(&self.snapshot)?;
+            return Ok(checkpoint_offset);
+        }
+
+        let mut scanner = ByteScanner::new_at(
+            Arc::clone(&self.snapshot),
+            self.options.scan_options(),
+            ByteOffset::new(checkpoint_offset),
+        )?;
+        let mut next_start = checkpoint_offset;
+        while current_line < line_number.get() {
+            let scanned = scan_next_ignoring_content(&mut scanner)?.ok_or(
+                LineAccessError::UnexpectedScannerEof {
+                    offset: ByteOffset::new(next_start),
+                    snapshot_length: self.snapshot_length,
+                },
+            )?;
+            next_start = scanned.physical_range.end().get();
+            current_line =
+                current_line
+                    .checked_add(1)
+                    .ok_or(LineAccessError::LineNumberOverflow {
+                        line_number: LineNumber::new(current_line),
+                    })?;
+        }
+        ensure_snapshot_fresh(&self.snapshot)?;
+        Ok(next_start)
+    }
+
+    fn visit_bytes<E>(
+        &self,
+        range: ByteRange,
+        mut visitor: impl FnMut(ByteRange, &[u8]) -> Result<(), E>,
+    ) -> Result<(), VisitBytesError<E>> {
+        ensure_snapshot_fresh(&self.snapshot)?;
+        if range.is_empty() {
+            return Ok(());
+        }
+        let requested = self.options.scan_chunk_bytes();
+        let buffer_len = self.options.scan_options().scan_chunk_usize();
+        let mut buffer = Vec::new();
+        buffer
+            .try_reserve_exact(buffer_len)
+            .map_err(|source| LineAccessError::ScanBufferAllocationFailed { requested, source })?;
+        buffer.resize(buffer_len, 0);
+
+        let mut offset = range.offset().get();
+        let end = range.end().get();
+        while offset < end {
+            let remaining = end
+                .checked_sub(offset)
+                .ok_or(LineAccessError::CoordinateOverflow {
+                    offset: ByteOffset::new(offset),
+                    length: ByteLength::new(end),
+                })?;
+            let read_len_u64 = remaining.min(requested.get());
+            let read_len = usize::try_from(read_len_u64).map_err(|_| {
+                LineAccessError::ScanChunkNotRepresentable {
+                    value: ByteLength::new(read_len_u64),
+                }
+            })?;
+            let read = self
+                .snapshot
+                .read_at(ByteOffset::new(offset), &mut buffer[..read_len])
+                .map_err(LineAccessError::FileAccess)?;
+            if read == 0 {
+                return Err(LineAccessError::UnexpectedScannerEof {
+                    offset: ByteOffset::new(offset),
+                    snapshot_length: self.snapshot_length,
+                }
+                .into());
+            }
+            let next =
+                offset
+                    .checked_add(read as u64)
+                    .ok_or(LineAccessError::CoordinateOverflow {
+                        offset: ByteOffset::new(offset),
+                        length: ByteLength::new(read as u64),
+                    })?;
+            let chunk_range = checked_range(offset, next)?;
+            visitor(chunk_range, &buffer[..read]).map_err(VisitBytesError::Visitor)?;
+            offset = next;
+        }
+        ensure_snapshot_fresh(&self.snapshot)?;
+        Ok(())
+    }
 }
 
 fn ignore_line_content(_: LineContentChunk<'_>) -> Result<(), Infallible> {
     Ok(())
+}
+
+fn scan_next_ignoring_content(scanner: &mut ByteScanner) -> LineAccessResult<Option<ScannedLine>> {
+    let mut ignore_content = ignore_line_content;
+    match scanner.scan_next_line(&mut ignore_content) {
+        Ok(scanned) => Ok(scanned),
+        Err(ScanError::Visitor(never)) => match never {},
+        Err(ScanError::FileAccess(source)) => Err(LineAccessError::FileAccess(source)),
+        Err(ScanError::Scanner(error)) => Err(error),
+    }
 }
 
 struct CheckpointState {

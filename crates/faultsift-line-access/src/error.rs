@@ -2,9 +2,9 @@ use std::collections::TryReserveError;
 use std::error::Error;
 use std::fmt;
 
-use faultsift_file_access::{ByteLength, ByteOffset, FileAccessError};
+use faultsift_file_access::{ByteLength, ByteOffset, FileAccessError, SnapshotGeneration};
 
-use crate::LineNumber;
+use crate::{LineNumber, LineRange};
 
 /// Result type for line-access configuration and cursor construction.
 pub type LineAccessResult<T> = Result<T, LineAccessError>;
@@ -57,6 +57,26 @@ pub enum LineAccessError {
     },
     LineNumberOverflow {
         line_number: LineNumber,
+    },
+    LineNumberOutOfBounds {
+        line_number: LineNumber,
+        line_count: u64,
+    },
+    InvalidLineRange {
+        start: LineNumber,
+        end: LineNumber,
+    },
+    LineRangeOutOfBounds {
+        range: LineRange,
+        line_count: u64,
+    },
+    DescriptorGenerationMismatch {
+        expected: SnapshotGeneration,
+        actual: SnapshotGeneration,
+    },
+    SpanGenerationMismatch {
+        expected: SnapshotGeneration,
+        actual: SnapshotGeneration,
     },
     UnexpectedScannerEof {
         offset: ByteOffset,
@@ -131,6 +151,34 @@ impl fmt::Display for LineAccessError {
                 "physical line number overflowed after {}",
                 line_number.get()
             ),
+            Self::LineNumberOutOfBounds {
+                line_number,
+                line_count,
+            } => write!(
+                formatter,
+                "physical line number {} is outside line count {line_count}",
+                line_number.get()
+            ),
+            Self::InvalidLineRange { start, end } => write!(
+                formatter,
+                "physical line range start {} exceeds end {}",
+                start.get(),
+                end.get()
+            ),
+            Self::LineRangeOutOfBounds { range, line_count } => write!(
+                formatter,
+                "physical line range [{}, {}) exceeds line count {line_count}",
+                range.start().get(),
+                range.end().get()
+            ),
+            Self::DescriptorGenerationMismatch { expected, actual } => write!(
+                formatter,
+                "line descriptor generation {actual:?} does not match index generation {expected:?}"
+            ),
+            Self::SpanGenerationMismatch { expected, actual } => write!(
+                formatter,
+                "line span generation {actual:?} does not match index generation {expected:?}"
+            ),
             Self::UnexpectedScannerEof {
                 offset,
                 snapshot_length,
@@ -198,6 +246,40 @@ impl<E: fmt::Display> fmt::Display for VisitLineError<E> {
 }
 
 impl<E: Error + 'static> Error for VisitLineError<E> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::LineAccess(error) => Some(error),
+            Self::Visitor(error) => Some(error),
+        }
+    }
+}
+
+/// Error from one independent ready-index bounded byte visit.
+///
+/// Visitor errors remain in their original caller-defined type and do not
+/// poison the immutable index or its snapshot lifecycle.
+#[derive(Debug)]
+pub enum VisitBytesError<E> {
+    LineAccess(LineAccessError),
+    Visitor(E),
+}
+
+impl<E> From<LineAccessError> for VisitBytesError<E> {
+    fn from(error: LineAccessError) -> Self {
+        Self::LineAccess(error)
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for VisitBytesError<E> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::LineAccess(error) => error.fmt(formatter),
+            Self::Visitor(error) => write!(formatter, "bounded byte visitor failed: {error}"),
+        }
+    }
+}
+
+impl<E: Error + 'static> Error for VisitBytesError<E> {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::LineAccess(error) => Some(error),

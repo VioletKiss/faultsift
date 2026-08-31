@@ -38,6 +38,23 @@ impl ByteScanner {
         snapshot: Arc<FileSnapshot>,
         options: ScanOptions,
     ) -> Result<Self, LineAccessError> {
+        Self::new_at(snapshot, options, ByteOffset::new(0))
+    }
+
+    /// Starts the shared scanner at an exact known physical-line boundary.
+    pub(crate) fn new_at(
+        snapshot: Arc<FileSnapshot>,
+        options: ScanOptions,
+        start: ByteOffset,
+    ) -> Result<Self, LineAccessError> {
+        let captured_length = snapshot.len();
+        if start.get() > captured_length.get() {
+            return Err(LineAccessError::FileAccess(FileAccessError::OutOfBounds {
+                offset: start,
+                length: ByteLength::new(0),
+                snapshot_length: captured_length,
+            }));
+        }
         let mut buffer = Vec::new();
         buffer
             .try_reserve_exact(options.scan_chunk_usize())
@@ -46,12 +63,11 @@ impl ByteScanner {
                 source,
             })?;
         buffer.resize(options.scan_chunk_usize(), 0);
-        let captured_length = snapshot.len();
 
         Ok(Self {
             snapshot,
             buffer: buffer.into_boxed_slice(),
-            buffer_start: 0,
+            buffer_start: start.get(),
             buffer_len: 0,
             buffer_pos: 0,
             buffer_end_reported: false,

@@ -12,7 +12,12 @@ mod scanner;
 mod types;
 
 pub use cursor::PhysicalLineCursor;
-pub use error::{CursorFailure, LineAccessError, LineAccessResult, VisitLineError};
+pub use error::{
+    CursorFailure, LineAccessError, LineAccessResult, VisitBytesError, VisitLineError,
+};
 pub use index::{BuildControl, BuildProgress, LineIndex};
 pub use options::{LineIndexOptions, ScanOptions};
-pub use types::{CursorState, LineContentChunk, LineDescriptor, LineNumber, LineTerminator};
+pub use types::{
+    CursorState, LineContentChunk, LineDescriptor, LineNumber, LineRange, LineSpan, LineTerminator,
+    PhysicalSpanChunk,
+};
