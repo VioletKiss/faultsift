@@ -1,6 +1,6 @@
 # FS-008: Ready Line Lookup and Bounded Readers
 
-- Status: Proposed
+- Status: Completed
 - Owner: Unassigned
 - Related ADRs: ADR-0003, ADR-0004
 - Roadmap stage: M2 — Line Access / Index
@@ -61,18 +61,18 @@ FS-007 produces an immutable complete `LineIndex` with exact count and adaptive 
 
 ## Acceptance Criteria
 
-- [ ] Every valid line number returns the exact generation-tagged descriptor, and `line_count` or larger returns a typed bounds error.
-- [ ] Descriptor coordinates and terminator kind match a sequential FS-006 cursor over the same snapshot for LF, CRLF, lone CR, blank, invalid-byte, and final-unterminated cases.
-- [ ] Every valid non-empty `LineRange` returns one exact O(1)-sized `LineSpan` without constructing the intervening line descriptors or bytes.
-- [ ] Invalid reversed or out-of-bounds ranges return typed errors.
-- [ ] Every valid empty range has the approved zero-length anchor, including EOF on empty and non-empty files.
-- [ ] Descriptor content readers deliver exactly `content_range` in ordered bounded chunks and never deliver terminators.
-- [ ] Span physical readers deliver exactly `physical_range` in ordered bounded chunks including original LF/CRLF bytes, and empty spans deliver no chunks.
-- [ ] A huge single line and a huge line span remain bounded-memory and do not produce `LineTooLarge`, owned complete bytes, or a view collection.
-- [ ] Old-generation descriptors/spans are rejected by a new index after `reopen()` before source bytes are read.
-- [ ] A stale bound snapshot causes every byte-reading or local-scanning lookup/reader to return the existing stale reason, while ready metadata introspection remains available.
-- [ ] Multiple threads can perform deterministic independent lookups on one ready index without a shared seek cursor, global line lock, mutable detailed cache, or data race.
-- [ ] No offset reverse lookup, approximate seek, persistence, resource defaults, Parser, Search, Tauri, UI, or AI behavior is introduced.
+- [x] Every valid line number returns the exact generation-tagged descriptor, and `line_count` or larger returns a typed bounds error.
+- [x] Descriptor coordinates and terminator kind match a sequential FS-006 cursor over the same snapshot for LF, CRLF, lone CR, blank, invalid-byte, and final-unterminated cases.
+- [x] Every valid non-empty `LineRange` returns one exact O(1)-sized `LineSpan` without constructing the intervening line descriptors or bytes.
+- [x] Invalid reversed or out-of-bounds ranges return typed errors.
+- [x] Every valid empty range has the approved zero-length anchor, including EOF on empty and non-empty files.
+- [x] Descriptor content readers deliver exactly `content_range` in ordered bounded chunks and never deliver terminators.
+- [x] Span physical readers deliver exactly `physical_range` in ordered bounded chunks including original LF/CRLF bytes, and empty spans deliver no chunks.
+- [x] A huge single line and a huge line span remain bounded-memory and do not produce `LineTooLarge`, owned complete bytes, or a view collection.
+- [x] Old-generation descriptors/spans are rejected by a new index after `reopen()` before source bytes are read.
+- [x] A stale bound snapshot causes every byte-reading or local-scanning lookup/reader to return the existing stale reason, while ready metadata introspection remains available.
+- [x] Multiple threads can perform deterministic independent lookups on one ready index without a shared seek cursor, global line lock, mutable detailed cache, or data race.
+- [x] No offset reverse lookup, approximate seek, persistence, resource defaults, Parser, Search, Tauri, UI, or AI behavior is introduced.
 
 ## Test Cases
 
@@ -105,6 +105,27 @@ rg -n '\bunsafe\s+(fn|trait|impl|extern)|\bunsafe\s*\{' crates/faultsift-line-ac
 
 Inspect focused tests and source to confirm large ranges return constant-sized metadata, readers remain chunked, stale/generation checks precede byte access, and no reverse/approximate lookup or mutable cache exists. Required Windows and Ubuntu CI must pass for the exact pushed commit.
 
+## Completion Evidence
+
+Implemented, independently reviewed, and remotely verified on 2026-08-31.
+
+- `LineIndex::line` checks snapshot freshness and bounds, selects `floor(line_number / final_stride)` by checked `u64` arithmetic and direct checkpoint indexing, then creates an operation-local `ByteScanner` at that exact checkpoint offset. It scans at most the local checkpoint interval plus the required target line and returns the scanner's exact descriptor; it never rescans from file start unless checkpoint zero is the nearest checkpoint.
+- `LineRange` is checked, zero-based, and half-open. `LineIndex::line_range` returns one generation-tagged `LineSpan`; it locates only the start boundary and last included line, retains no intermediate descriptors or bytes, and implements every approved empty anchor including `[line_count, line_count)` at captured EOF.
+- `visit_line_content` streams only `content_range` through borrowed ordered chunks; `visit_span_physical` streams the contiguous raw `physical_range` including LF/CRLF. Both allocate at most one operation-local `scan_chunk_bytes` buffer, skip allocation for empty ranges, preserve visitor error types, and do not poison the immutable index or snapshot after consumer failure.
+- Descriptor and span readers reject reopened-generation coordinates with typed mismatch errors before byte access. Lookup and reader operations check the bound snapshot lifecycle, propagate File Access errors, preserve the existing `UnexpectedEof` stale transition, and leave ready metadata inspectable after stale.
+- The only production LF/CRLF and pending-CR state machine remains `ByteScanner`. Lookup adds only an exact-start constructor and does not add a second newline parser, shared seek cursor, mutable descriptor cache, global lock, or unsafe Rust.
+- Focused tests compare every lookup descriptor with the FS-006 sequential cursor across empty, LF, CRLF, lone-CR, blank, invalid-byte, NUL, and final-unterminated cases. They cover checkpoint boundaries, multiple adaptive final strides, huge-line readers, exact physical span bytes, empty readers, visitor failure recovery, reopen mismatch, stale/read failure, 100,000-line O(1)-sized span metadata, deterministic parallel operations, and coordinates beyond 4 GiB.
+- `cargo fmt --all -- --check` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `cargo test -p faultsift-line-access` passed 55 tests across four suites.
+- `cargo test --workspace` passed 104 tests across the workspace suites.
+- `cargo tree -p faultsift-line-access --edges normal` showed only the expected direct `faultsift-file-access` dependency and its existing platform dependencies; no dependency was added or removed.
+- `cargo check -p faultsift-line-access --all-targets --all-features --target x86_64-unknown-linux-gnu` and the matching target Clippy command passed.
+- `git diff --check` passed, and the required unsafe scan returned no matches under `crates/faultsift-line-access/**/*.rs`.
+- Independent `faultsift-review` returned `PASS_WITH_WARNINGS` with no Blocking issue, source defect, material memory concern, dependency concern, or scope violation. Its sole warning was the then-pending exact-pushed-commit CI evidence, resolved by the run below.
+- Implementation commit `64956530b3f20cec2e311d430eda2b52042486da` passed exact-SHA [GitHub Actions run 33347263272](https://github.com/VioletKiss/faultsift/actions/runs/33347263272): Frontend quality, Rust Windows, and Rust Ubuntu all completed with `success`.
+- No cursor-from-line convenience, reverse/approximate lookup, persistence, benchmark/default work, Parser, Search, Tauri, UI, or AI behavior was introduced.
+
 ## Expected Files
 
 - focused additions under `crates/faultsift-line-access/src/` for line ranges, spans, ready lookup, generation validation, and bounded readers;
@@ -135,4 +156,3 @@ None. Cursor-from-line convenience remains deliberately unimplemented until a co
 - stale and generation checks on checkpoint hits and readers;
 - concurrent immutable lookup with no shared seek cursor or mutable cache;
 - absence of reverse lookup, persistence, defaults, parser/search semantics, and adapter/UI scope.
-
