@@ -102,6 +102,8 @@ CI compiles the benchmark target on Windows and Ubuntu and runs the bounded inte
 
 The table below was recorded on 2026-08-31 from base commit `8810e540e6376f09184b217cc0603853f8ca29a9` with `worktree_dirty=true`. The dirty policy includes staged, unstaged, and ordinary untracked files. This accurately identifies the pre-commit FS-009 implementation worktree. A full final-source rerun on 2026-09-01 completed both forced-buffered and mapped groups after the independent-review fixes; an exact implementation-commit confirmation is recorded after local commit.
 
+The exact implementation-commit confirmation ran on 2026-09-01 at `601ca06a8a620a569d9209b32404118b78d51e8b` with `worktree_dirty=false`. Its full run completed both Windows backend groups and the normal `all-groups-finished` endpoint with exit code zero. The confirmation preserves the baseline interpretation below; its purpose is to prove accurate clean-commit metadata and final-harness execution, not to replace the recorded central estimates after another uncontrolled warm-cache sample.
+
 | Field | Value |
 |---|---|
 | OS | Windows build 10.0.26200.9168, x86_64 |
