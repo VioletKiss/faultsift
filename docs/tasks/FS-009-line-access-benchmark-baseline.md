@@ -1,6 +1,6 @@
 # FS-009: Line Access Benchmark Baseline
 
-- Status: In Progress — implementation, local Windows baseline, and independent review complete; required exact-SHA CI pending
+- Status: Completed — 2026-09-01
 - Owner: Unassigned
 - Related ADRs: ADR-0003, ADR-0004
 - Roadmap stage: M2 — Line Access / Index
@@ -64,19 +64,27 @@ FS-006 through FS-008 complete the M2 Line Access contract. [ADR-0004](../adr/00
 
 ## Acceptance Criteria
 
-- [ ] One documented stable-compatible command runs a deterministic Line Access benchmark harness without checked-in large fixtures.
-- [ ] Build workloads cover LF and CRLF distributions near 80, 200, and 500 average physical bytes with explicit fixture, budget, scan-chunk, backend, and cache metadata.
-- [ ] Results report index build throughput together with exact checkpoint payload/capacity, checkpoint count, final stride, and compaction count.
-- [ ] Explicit 16/32/64 MiB checkpoint-budget and 64 KiB/1 MiB scan-chunk candidates are measured or any environment-driven reduction is clearly recorded without becoming a default.
-- [ ] Seeded random line and line-range lookup reports latency plus scanned work where available and verifies exact results.
-- [ ] Sequential content-bearing cursor measurements consume deterministic content bytes and report actual processed bytes rather than descriptor counts alone.
-- [ ] Cancellation measurements verify callback count scales with chunks rather than physical lines and record the bounded-chunk responsiveness limitation.
-- [ ] Newline-dense and huge-line workloads demonstrate bounded checkpoint/buffer behavior and are labelled separately from representative throughput.
-- [ ] Windows results verify actual mapped/forced-buffered diagnostics when both are available; Linux results use and report the buffered backend.
-- [ ] The baseline document records environment, commands, fixtures, seeds, options, backend, cache limitations, results, memory methodology, and interpretation limits.
-- [ ] Required Windows and Ubuntu CI compile the harness and run bounded correctness tests without enforcing noisy performance thresholds.
-- [ ] Criterion or any equivalent harness dependency is benchmark-only and absent from the crate's normal dependency path.
-- [ ] No resource default, absolute threshold, semantic optimization, later index feature, Parser, Search, persistence, Tauri, UI, or AI behavior is introduced.
+- [x] One documented stable-compatible command runs a deterministic Line Access benchmark harness without checked-in large fixtures.
+- [x] Build workloads cover LF and CRLF distributions near 80, 200, and 500 average physical bytes with explicit fixture, budget, scan-chunk, backend, and cache metadata.
+- [x] Results report index build throughput together with exact checkpoint payload/capacity, checkpoint count, final stride, and compaction count.
+- [x] Explicit 16/32/64 MiB checkpoint-budget and 64 KiB/1 MiB scan-chunk candidates are measured or any environment-driven reduction is clearly recorded without becoming a default.
+- [x] Seeded random line and line-range lookup reports latency plus scanned work where available and verifies exact results.
+- [x] Sequential content-bearing cursor measurements consume deterministic content bytes and report actual processed bytes rather than descriptor counts alone.
+- [x] Cancellation measurements verify callback count scales with chunks rather than physical lines and record the bounded-chunk responsiveness limitation.
+- [x] Newline-dense and huge-line workloads demonstrate bounded checkpoint/buffer behavior and are labelled separately from representative throughput.
+- [x] Windows results verify actual mapped/forced-buffered diagnostics when both are available; Linux results use and report the buffered backend.
+- [x] The baseline document records environment, commands, fixtures, seeds, options, backend, cache limitations, results, memory methodology, and interpretation limits.
+- [x] Required Windows and Ubuntu CI compile the harness and run bounded correctness tests without enforcing noisy performance thresholds.
+- [x] Criterion or any equivalent harness dependency is benchmark-only and absent from the crate's normal dependency path.
+- [x] No resource default, absolute threshold, semantic optimization, later index feature, Parser, Search, persistence, Tauri, UI, or AI behavior is introduced.
+
+## Completion Evidence
+
+- Implementation commit: `601ca06a8a620a569d9209b32404118b78d51e8b`.
+- Exact clean-commit full benchmark: completed on Windows with mapped and forced-buffered groups, `worktree_dirty=false`, and exit code zero.
+- Independent review: `PASS_WITH_WARNINGS`, with no Blocking issues; its only pre-push warning was the then-pending exact-SHA CI evidence.
+- Required pre-completion CI: Windows Rust, Ubuntu Rust, and Frontend all passed for `5bd39dfaaefc67a21206978ee78eef9c5bc6f5a5` in [CI run 33459860502](https://github.com/VioletKiss/faultsift/actions/runs/33459860502).
+- Named resource defaults and regression thresholds remain unapproved.
 
 ## Test Cases
 
