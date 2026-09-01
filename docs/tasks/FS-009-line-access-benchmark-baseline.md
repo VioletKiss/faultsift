@@ -1,6 +1,6 @@
 # FS-009: Line Access Benchmark Baseline
 
-- Status: Proposed
+- Status: In Progress — implementation, local Windows baseline, and independent review complete; required exact-SHA CI pending
 - Owner: Unassigned
 - Related ADRs: ADR-0003, ADR-0004
 - Roadmap stage: M2 — Line Access / Index
@@ -141,4 +141,3 @@ None. Named defaults and regression thresholds require a separate approval after
 - bounded fixture generation, workloads, concurrency, and retained state;
 - candidate comparison without implementing defaults, thresholds, or semantic optimizations;
 - absence of File Access re-benchmarking, later index features, persistence, Parser/Search semantics, and adapter/UI/AI scope.
-

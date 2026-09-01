@@ -892,6 +892,7 @@ dependencies = [
 name = "faultsift-line-access"
 version = "0.0.0"
 dependencies = [
+ "criterion",
  "faultsift-file-access",
 ]
 

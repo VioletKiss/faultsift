@@ -50,4 +50,5 @@ jobs:
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --workspace
       - run: cargo check -p faultsift-file-access --benches
+      - run: cargo check -p faultsift-line-access --benches
       - run: cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml
